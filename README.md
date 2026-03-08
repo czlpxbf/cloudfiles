@@ -27,6 +27,8 @@
 
 ## 📋 安装步骤
 
+### 第零步：下载本项目源代码<>code——DOWNLOAD .zip
+
 ### 第一步：安装 Node.js
 
 1. 访问 [nodejs.org](https://nodejs.org)
