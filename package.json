@@ -1,0 +1,34 @@
+{
+  "name": "cloudfiles",
+  "version": "1.0.0",
+  "description": "Cloudfiles - A modern cloud storage solution built on Cloudflare Pages. Provides unlimited file storage with version history, beautiful web interface, and powerful file management capabilities.",
+  "author": "Cloudfiles Team",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "cloudflare",
+    "pages",
+    "storage",
+    "cloud",
+    "file-manager",
+    "version-control"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cloudfiles/cloudfiles"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "execa": "^9.6.0",
+    "exifreader": "^4.32.0",
+    "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "heic-convert": "^2.1.0",
+    "mime-types": "^3.0.1",
+    "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
+    "p-queue": "^9.0.0",
+    "path": "^0.12.7",
+    "rimraf": "^6.0.1"
+  }
+}

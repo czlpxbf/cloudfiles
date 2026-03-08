@@ -1,0 +1,1331 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+<!-- 
+╔══════════════════════════════════════════════════════════════╗
+║                    自定义配置说明                              ║
+╠══════════════════════════════════════════════════════════════╣
+║  如需修改网站信息，请编辑 index.html 文件：                      ║
+║                                                              ║
+║  第7行:   <title>Cloudfiles</title>  ← 浏览器标签标题       ║
+║  第17行:  src="图标URL"                   ← 左上角图标           ║
+║  第19行:  <h1>MY DRIVE</h1>               ← 项目名称             ║
+║  第20行:  <div class="subtitle">xxx</div> ← 项目介绍             ║
+║                                                              ║
+║  图标推荐使用正方形图片，支持任意图片URL                         ║
+╚══════════════════════════════════════════════════════════════╝
+-->
+    <title>Cloudfiles</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link rel="stylesheet" href="./index.css" />
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- 顶部工具栏 -->
+        <header class="header">
+            <div class="brand">
+                <div class="logo" id="logoContainer"><img id="logoImg" src="https://api.dicebear.com/7.x/shapes/svg?seed=cloud&backgroundColor=0891b2" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"></div>
+                <div class="brand-text">
+                    <h1 id="siteName">CLOUDFILES</h1>
+                    <div class="subtitle" id="siteSubtitle">Unlimited Cloud Storage</div>
+                </div>
+            </div>
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <button id="refreshBtn" class="btn icon-btn" title="刷新">↻</button>
+                    <button id="newFolderBtn" class="btn icon-btn" title="新建文件夹">+</button>
+                    <button id="uploadBtnTop" class="btn icon-btn" title="上传文件">↑</button>
+                </div>
+                <div class="toolbar-divider"></div>
+                <div class="path-display" id="pathDisplay">/</div>
+                <div class="toolbar-divider"></div>
+                <input id="searchInput" class="search-input" placeholder="SEARCH..." />
+                <!-- 点击这里触发空间分析 -->
+                <div id="usageInfo" class="usage-tag clickable" title="点击查看空间分析">LOADING...</div>
+            </div>
+        </header>
+
+        <!-- 主界面：Miller Columns 分栏视图 -->
+        <main class="miller-columns-container" id="columnsContainer">
+            <!-- 列内容将通过 JS 动态生成 -->
+            <div class="column loading-placeholder">载入文件系统结构...</div>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer class="footer">
+            <div id="status" class="status-text">准备就绪</div>
+            <div class="footer-controls">
+                <button id="openSite" class="btn-text">查看原始站点</button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 隐藏的文件输入框 -->
+    <input id="fileInput" type="file" multiple style="display:none" />
+
+    <!-- 本地上传进度条浮层 -->
+    <div id="progressOverlay" class="progress-overlay" style="display:none;">
+        <div class="progress-box">
+            <div class="progress-header">
+                <span>LOCAL UPLOAD</span>
+                <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress-track">
+                <div id="progressBar" class="progress-fill"></div>
+            </div>
+            <div id="progressText" class="progress-detail">正在初始化...</div>
+        </div>
+    </div>
+
+    <!-- 服务器任务进度模态窗口 (新增: SSE 进度) -->
+    <div id="taskModal" class="modal-overlay" style="display:none; z-index: 6000;">
+        <div class="modal-content" style="width: 600px; max-width: 95vw;">
+            <div class="modal-header">
+                <h2 id="taskModalTitle">Processing...</h2>
+                <!-- 任务进行中通常不允许关闭 -->
+            </div>
+            <div class="modal-body">
+                <div class="task-progress-container">
+                    <div class="task-progress-bar-bg">
+                        <div id="taskProgressBar" class="task-progress-bar-fill" style="width: 0%"></div>
+                    </div>
+                    <div id="taskProgressText" class="task-progress-text">0%</div>
+                </div>
+                <div class="task-console" id="taskConsole">
+                    <div class="console-line">Waiting for server logs...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 空间分析模态窗口 -->
+    <div id="usageModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content usage-modal-content">
+            <div class="modal-header">
+                <h2>存储空间分析</h2>
+                <button id="usageModalClose" class="modal-close-btn">×</button>
+            </div>
+            <div class="modal-body usage-body">
+                <div class="chart-container">
+                    <svg id="usageChart" viewBox="0 0 100 100" class="donut-chart"></svg>
+                    <div class="chart-center-text">
+                        <div id="totalUsageText" class="chart-total">0 GB</div>
+                        <div class="chart-label">当前目录总占用</div>
+                    </div>
+                </div>
+                <div class="usage-list-container">
+                    <div class="usage-nav-header">
+                        <h3 class="usage-title">空间分布详情</h3>
+                        <div id="usageBreadcrumb" class="usage-breadcrumb">/</div>
+                    </div>
+                    <ul id="usageList" class="usage-list"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 版本历史模态窗口 -->
+    <div id="versionModal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="versionModalTitle">版本历史</h2>
+                <button id="versionModalClose" class="modal-close-btn">×</button>
+            </div>
+            <div class="modal-actions">
+                <button id="cleanHistoryBtn" class="btn danger-btn">清理旧版本</button>
+            </div>
+            <div class="modal-body">
+                <ul id="versionList" class="version-list"></ul>
+            </div>
+            <div class="modal-hint">提示：右键点击列表中的版本可进行重命名或删除</div>
+        </div>
+    </div>
+
+    <!-- 通用输入/确认模态窗口 (暗黑风格) -->
+    <div id="inputModal" class="modal-overlay" style="display:none; z-index: 5000;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2 id="inputModalTitle">提示</h2>
+                <button id="inputModalClose" class="modal-close-btn">×</button>
+            </div>
+            <div class="modal-body">
+                <p id="inputModalMessage" style="margin-bottom: 16px; color: var(--text-muted); font-size: 13px;"></p>
+                <input id="inputModalInput" class="search-input" style="width: 100%; margin-bottom: 24px; display: none;" autocomplete="off" />
+                <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                    <button id="inputModalCancel" class="btn">CANCEL</button>
+                    <button id="inputModalConfirm" class="btn primary-btn">CONFIRM</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 灯箱 -->
+    <div id="lightboxOverlay" class="lightbox-overlay" style="display:none;">
+        <div class="lightbox-content" id="lightboxContent"></div>
+        <button id="lightboxClose" class="lightbox-close">×</button>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const API_BASE_URL = ''; 
+            const CHUNK_SIZE = 20 * 1024 * 1024;
+            const MAIN_PROJECT_URL = '%%MAIN_PROJECT_URL%%';
+
+            // State
+            let fsRoot = { type: 'folder', children: {} };
+            let currentPath = '/'; 
+            let uploading = false;
+
+            // DOM Elements
+            const columnsContainer = document.getElementById('columnsContainer');
+            const pathDisplay = document.getElementById('pathDisplay');
+            const status = document.getElementById('status');
+            const usageInfo = document.getElementById('usageInfo');
+            
+            // --- Task Progress Modal Logic (SSE) ---
+            function showTaskProgressModal(taskId, title) {
+                return new Promise((resolve, reject) => {
+                    const modal = document.getElementById('taskModal');
+                    const titleEl = document.getElementById('taskModalTitle');
+                    const bar = document.getElementById('taskProgressBar');
+                    const text = document.getElementById('taskProgressText');
+                    const consoleEl = document.getElementById('taskConsole');
+
+                    titleEl.textContent = title || 'Processing Task...';
+                    bar.style.width = '0%';
+                    text.textContent = '0%';
+                    consoleEl.innerHTML = '<div class="console-line">Connecting to server...</div>';
+                    modal.style.display = 'flex';
+
+                    // 添加关闭按钮
+                    const closeBtn = document.createElement('button');
+                    closeBtn.className = 'btn';
+                    closeBtn.textContent = 'Close';
+                    closeBtn.style.cssText = 'margin-top:10px;display:block;margin-left:auto;margin-right:auto;';
+                    closeBtn.onclick = () => {
+                        modal.style.display = 'none';
+                        closeBtn.remove();
+                    };
+                    consoleEl.parentElement.appendChild(closeBtn);
+
+                    const eventSource = new EventSource(`${API_BASE_URL}/api/task/events/${taskId}`);
+                    
+                    let finalResult = null;
+
+                    eventSource.onmessage = (e) => {
+                        const msg = JSON.parse(e.data);
+                        const { type, data } = msg;
+
+                        if (type === 'log') {
+                            const line = document.createElement('div');
+                            line.className = 'console-line';
+                            line.textContent = data;
+                            consoleEl.appendChild(line);
+                            consoleEl.scrollTop = consoleEl.scrollHeight; 
+                        } else if (type === 'progress') {
+                            const pct = Math.min(100, Math.max(0, data));
+                            bar.style.width = pct + '%';
+                            text.textContent = pct + '%';
+                        } else if (type === 'download_ready') {
+                            // 特殊事件：下载准备就绪
+                            finalResult = data; 
+                        } else if (type === 'complete') {
+                            eventSource.close();
+                            closeBtn.remove();
+                            setTimeout(() => {
+                                modal.style.display = 'none';
+                                resolve(finalResult || true);
+                            }, 500);
+                        } else if (type === 'error') {
+                            eventSource.close();
+                            const line = document.createElement('div');
+                            line.className = 'console-line error';
+                            line.textContent = 'ERROR: ' + data;
+                            consoleEl.appendChild(line);
+                            // 不自动关闭，让用户看到错误
+                            reject(new Error(data));
+                        }
+                    };
+
+                    eventSource.onerror = (err) => {
+                        console.error('SSE Error:', err);
+                    };
+                });
+            }
+
+            // --- Custom Modal Logic ---
+            function showInputModal({ title, message, defaultValue = null, isConfirm = false, danger = false, placeholder = '' }) {
+                return new Promise((resolve) => {
+                    const modal = document.getElementById('inputModal');
+                    const titleEl = document.getElementById('inputModalTitle');
+                    const msgEl = document.getElementById('inputModalMessage');
+                    const inputEl = document.getElementById('inputModalInput');
+                    const confirmBtn = document.getElementById('inputModalConfirm');
+                    const cancelBtn = document.getElementById('inputModalCancel');
+                    const closeBtn = document.getElementById('inputModalClose');
+
+                    // Reset
+                    titleEl.textContent = title || (isConfirm ? 'CONFIRM' : 'INPUT');
+                    msgEl.textContent = message || '';
+                    msgEl.style.display = message ? 'block' : 'none';
+                    
+                    if (isConfirm) {
+                        inputEl.style.display = 'none';
+                    } else {
+                        inputEl.style.display = 'block';
+                        inputEl.value = defaultValue || '';
+                        inputEl.placeholder = placeholder;
+                    }
+
+                    // Button Styles
+                    if (danger) {
+                        confirmBtn.classList.remove('primary-btn');
+                        confirmBtn.classList.add('danger-btn');
+                    } else {
+                        confirmBtn.classList.remove('danger-btn');
+                        confirmBtn.classList.add('primary-btn');
+                    }
+
+                    modal.style.display = 'flex';
+                    
+                    if (!isConfirm) setTimeout(() => inputEl.focus(), 50);
+                    else setTimeout(() => confirmBtn.focus(), 50);
+
+                    const close = (val) => {
+                        modal.style.display = 'none';
+                        resolve(val);
+                    };
+
+                    confirmBtn.onclick = () => {
+                        if (isConfirm) close(true);
+                        else close(inputEl.value);
+                    };
+
+                    const handleCancel = () => {
+                        if (isConfirm) close(false);
+                        else close(null);
+                    };
+
+                    cancelBtn.onclick = handleCancel;
+                    closeBtn.onclick = handleCancel;
+
+                    inputEl.onkeyup = (e) => {
+                        if (e.key === 'Enter') confirmBtn.click();
+                        if (e.key === 'Escape') handleCancel();
+                    };
+                    if(isConfirm) confirmBtn.onkeyup = (e) => { if(e.key==='Escape') handleCancel(); };
+                });
+            }
+
+            function getFileType(filename) {
+                if (!filename) return null;
+                const ext = filename.split('.').pop().toLowerCase();
+                const MEDIA_EXTENSIONS = {
+                    image: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif'],
+                    video: ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'],
+                    text: ['txt', 'md', 'markdown', 'json', 'js', 'ts', 'css', 'scss', 'sass', 'less', 'html', 'htm', 'xml', 'yaml', 'yml', 'ini', 'conf', 'cfg', 'config', 'log', 'csv', 'tsv', 'sh', 'bash', 'bat', 'cmd', 'ps1', 'py', 'java', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'hxx', 'go', 'rs', 'rb', 'php', 'sql', 'vue', 'jsx', 'tsx', 'svelte', 'astro', 'dockerfile', 'makefile', 'gitignore', 'env', 'example', 'sample', 'readme', 'license', 'changelog', 'authors', 'contributors', 'todo']
+                };
+                if (MEDIA_EXTENSIONS.image.includes(ext)) return 'image';
+                if (MEDIA_EXTENSIONS.video.includes(ext)) return 'video';
+                if (MEDIA_EXTENSIONS.text.includes(ext)) return 'text';
+                // 特殊文件名检测
+                const lowerName = filename.toLowerCase();
+                if (lowerName === 'dockerfile' || lowerName === 'makefile' || lowerName === 'license' || lowerName === 'readme' || lowerName === 'changelog' || lowerName === '.gitignore' || lowerName === '.env') return 'text';
+                return 'other';
+            }
+
+            function formatBytes(bytes) { 
+                if (!bytes && bytes !== 0) return '0 B'; 
+                const units = ['B', 'KB', 'MB', 'GB', 'TB']; 
+                let i = 0; 
+                while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; } 
+                return bytes.toFixed(2) + ' ' + units[i]; 
+            }
+
+            function formatDate(isoString) {
+                if (!isoString) return '--';
+                try {
+                    const date = new Date(isoString);
+                    const pad = (n) => n.toString().padStart(2, '0');
+                    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+                } catch (e) { return '--'; }
+            }
+
+            function setStatus(msg) { status.textContent = msg; }
+
+            // --- Core Logic: Fetch & Render ---
+
+            async function fetchTree() {
+                setStatus('SYNCING...');
+                try {
+                    const res = await fetch(API_BASE_URL + '/api/list');
+                    if (!res.ok) throw new Error('API Error');
+                    const json = await res.json();
+                    fsRoot = json.fs_root || { type: 'folder', children: {} };
+                    
+                    if (fsRoot.stats) {
+                        usageInfo.textContent = `${fsRoot.stats.totalSizeGB} GB USED`;
+                    } else {
+                        usageInfo.textContent = 'USAGE INFO';
+                    }
+                    
+                    renderColumns();
+                    setStatus('READY');
+                } catch (e) {
+                    setStatus('ERROR: ' + e.message);
+                    columnsContainer.innerHTML = `<div class="column error-column">Connection Failed: ${e.message}</div>`;
+                }
+            }
+
+            function getNodeAtPath(path) {
+                if (path === '/' || path === '') return fsRoot;
+                const parts = path.split('/').filter(p => p);
+                let cur = fsRoot;
+                for (const p of parts) {
+                    if (!cur?.children?.[p]) return null;
+                    cur = cur.children[p];
+                }
+                return cur;
+            }
+
+            // --- The Miller Columns Renderer ---
+            function renderColumns() {
+                columnsContainer.innerHTML = '';
+                pathDisplay.textContent = currentPath;
+
+                const parts = currentPath === '/' ? [''] : currentPath.split('/'); 
+                if (parts[0] !== '') parts.unshift(''); 
+
+                let accumulatedPath = '';
+                let currentLevelNode = fsRoot;
+
+                for (let i = 0; i < parts.length; i++) {
+                    const partName = parts[i]; 
+                    
+                    if (i === 0) accumulatedPath = '/';
+                    else accumulatedPath = accumulatedPath === '/' ? '/' + partName : accumulatedPath + '/' + partName;
+
+                    const nextPartName = parts[i + 1]; 
+
+                    if (currentLevelNode && currentLevelNode.type === 'folder') {
+                        const columnEl = createFolderColumn(currentLevelNode, accumulatedPath, nextPartName);
+                        columnsContainer.appendChild(columnEl);
+                    } else if (Array.isArray(currentLevelNode)) {
+                        const previewColumn = createFilePreviewColumn(partName, currentLevelNode, accumulatedPath);
+                        columnsContainer.appendChild(previewColumn);
+                    }
+
+                    if (nextPartName && currentLevelNode.children) {
+                        currentLevelNode = currentLevelNode.children[nextPartName];
+                    } else {
+                        currentLevelNode = null;
+                    }
+                }
+
+                setTimeout(() => {
+                    columnsContainer.scrollLeft = columnsContainer.scrollWidth;
+                }, 0);
+            }
+
+            // --- COLUMN CREATION WITH RESIZER ---
+            function createFolderColumn(node, parentPath, activeItemName) {
+                const col = document.createElement('div');
+                col.className = 'column';
+                
+                const ul = document.createElement('ul');
+                ul.className = 'column-list';
+
+                const children = node.children || {};
+                const keys = Object.keys(children).sort((a, b) => {
+                    const nodeA = children[a];
+                    const nodeB = children[b];
+                    const typeA = Array.isArray(nodeA) ? 'file' : 'folder';
+                    const typeB = Array.isArray(nodeB) ? 'file' : 'folder';
+                    if (typeA !== typeB) return typeA === 'folder' ? -1 : 1;
+                    return a.localeCompare(b);
+                });
+
+                if (keys.length === 0) {
+                    const empty = document.createElement('li');
+                    empty.className = 'column-item empty-msg';
+                    empty.textContent = 'EMPTY';
+                    ul.appendChild(empty);
+                }
+
+                keys.forEach(name => {
+                    const itemNode = children[name];
+                    const isFolder = !Array.isArray(itemNode);
+                    const isActive = name === activeItemName;
+                    
+                    const li = document.createElement('li');
+                    li.className = `column-item ${isActive ? 'active' : ''}`;
+                    
+                    const icon = isFolder ? '📁' : '📄';
+                    const arrow = isFolder ? '<span class="arrow">›</span>' : '';
+                    
+                    li.innerHTML = `
+                        <div class="col-icon">${icon}</div>
+                        <div class="col-name">${name}</div>
+                        ${arrow}
+                    `;
+
+                    li.onclick = () => {
+                        const newPath = parentPath === '/' ? '/' + name : parentPath + '/' + name;
+                        currentPath = newPath;
+                        renderColumns();
+                    };
+
+                    li.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const itemPath = parentPath === '/' ? '/' + name : parentPath + '/' + name;
+                        openContextMenu(e, itemPath, itemNode);
+                    });
+
+                    ul.appendChild(li);
+                });
+
+                col.appendChild(ul);
+
+                // --- Resizer Logic ---
+                const resizer = document.createElement('div');
+                resizer.className = 'resizer';
+                col.appendChild(resizer);
+
+                resizer.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    const startWidth = col.getBoundingClientRect().width;
+                    col.classList.add('resizing'); 
+
+                    const onMouseMove = (moveEvent) => {
+                        const delta = moveEvent.clientX - startX;
+                        const newWidth = startWidth + delta;
+                        if (newWidth > 150) { 
+                            col.style.width = `${newWidth}px`;
+                            col.style.minWidth = `${newWidth}px`;
+                            col.style.maxWidth = `${newWidth}px`;
+                        }
+                    };
+
+                    const onMouseUp = () => {
+                        col.classList.remove('resizing');
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    };
+
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+
+                return col;
+            }
+
+            // --- [NEW] Core Download Logic (Task based) ---
+            async function downloadWithProgress(path, timestamp) {
+                try {
+                    setStatus('REQUESTING DOWNLOAD...');
+                    const res = await axios.post(`${API_BASE_URL}/api/prepare-download`, { 
+                        path, 
+                        timestamp 
+                    });
+                    
+                    if (res.data.ok && res.data.taskId) {
+                        const filename = await showTaskProgressModal(res.data.taskId, 'Downloading from Cloudflare...');
+                        if (filename && typeof filename === 'string') {
+                            setStatus('DOWNLOADING TO BROWSER...');
+                            // 触发浏览器下载本地缓存的文件
+                            window.open(`${API_BASE_URL}/api/serve-file/${encodeURIComponent(filename)}`);
+                        } else {
+                            // 如果下载完成但没有捕捉到文件名 (fallback)
+                            alert('Download completed on server, but filename capture failed.');
+                        }
+                    } else {
+                        alert('Failed to start download task.');
+                    }
+                } catch (e) {
+                    alert('Download Error: ' + e.message);
+                }
+            }
+
+            function createFilePreviewColumn(filename, versions, fullPath) {
+                const col = document.createElement('div');
+                col.className = 'column preview-column';
+
+                const latest = versions.length > 0 ? [...versions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] : {};
+                const fileType = getFileType(filename);
+                const fileSize = latest.size || 0;
+                const sizeStr = formatBytes(fileSize);
+                const timeStr = formatDate(latest.createdAt);
+                
+                // 文件大小阈值：30MB（可修改此值）
+                // 例如：1MB = 1 * 1024 * 1024
+                //      10MB = 10 * 1024 * 1024
+                //      30MB = 30 * 1024 * 1024
+                const SIZE_THRESHOLD = 30 * 1024 * 1024;
+                const isLargeFile = fileSize > SIZE_THRESHOLD;
+
+                const previewUrl = `${API_BASE_URL}/api/preview?path=${encodeURIComponent(fullPath)}&timestamp=${latest.createdAt}`;
+                const downloadUrl = `${API_BASE_URL}/api/download?path=${encodeURIComponent(fullPath)}`;
+
+                const header = document.createElement('div');
+                header.className = 'preview-header';
+                header.textContent = filename;
+                col.appendChild(header);
+
+                // 媒体预览区域
+                let mediaEl = document.createElement('div');
+                mediaEl.className = 'preview-media';
+
+                // 根据文件类型和大小决定预览方式
+                if (fileType === 'image') {
+                    if (isLargeFile) {
+                        // 大图片：显示提示
+                        mediaEl.innerHTML = `
+                            <div class="large-file-warning">
+                                <div class="warning-icon">📷</div>
+                                <div class="warning-text">文件过大，预览较慢</div>
+                                <div class="warning-size">${sizeStr}</div>
+                                <button class="btn primary-btn load-preview-btn">加载预览</button>
+                            </div>
+                        `;
+                        mediaEl.querySelector('.load-preview-btn').onclick = () => {
+                            mediaEl.innerHTML = '<div class="loading-spinner"></div>';
+                            const img = document.createElement('img');
+                            img.src = previewUrl;
+                            img.alt = 'preview';
+                            img.onload = () => {
+                                mediaEl.innerHTML = '';
+                                mediaEl.appendChild(img);
+                                mediaEl.onclick = () => openLightboxInternal(previewUrl, 'image');
+                            };
+                            img.onerror = () => {
+                                mediaEl.innerHTML = '<div class="error-text">加载失败</div>';
+                            };
+                        };
+                    } else {
+                        // 小图片：直接加载
+                        mediaEl.innerHTML = `<img src="${previewUrl}" alt="preview">`;
+                        mediaEl.onclick = () => openLightboxInternal(previewUrl, 'image');
+                    }
+                } else if (fileType === 'video') {
+                    if (isLargeFile) {
+                        // 大视频：显示提示
+                        mediaEl.innerHTML = `
+                            <div class="large-file-warning">
+                                <div class="warning-icon">🎬</div>
+                                <div class="warning-text">文件过大，预览较慢</div>
+                                <div class="warning-size">${sizeStr}</div>
+                                <button class="btn primary-btn load-preview-btn">加载预览</button>
+                            </div>
+                        `;
+                        mediaEl.querySelector('.load-preview-btn').onclick = () => {
+                            mediaEl.innerHTML = '<div class="loading-spinner"></div>';
+                            setTimeout(() => {
+                                mediaEl.innerHTML = `<video src="${previewUrl}" controls></video>`;
+                            }, 100);
+                        };
+                    } else {
+                        // 小视频：直接加载
+                        mediaEl.innerHTML = `<video src="${previewUrl}" controls></video>`;
+                    }
+                } else if (fileType === 'text') {
+                    // 文本文件预览
+                    mediaEl.className = 'preview-text-container';
+                    if (isLargeFile) {
+                        mediaEl.innerHTML = `
+                            <div class="large-file-warning">
+                                <div class="warning-icon">📄</div>
+                                <div class="warning-text">文件过大，预览较慢</div>
+                                <div class="warning-size">${sizeStr}</div>
+                                <button class="btn primary-btn load-preview-btn">加载预览</button>
+                            </div>
+                        `;
+                        mediaEl.querySelector('.load-preview-btn').onclick = () => loadTextPreview(mediaEl, previewUrl);
+                    } else {
+                        mediaEl.innerHTML = '<div class="loading-spinner"></div>';
+                        loadTextPreview(mediaEl, previewUrl);
+                    }
+                } else {
+                    // 其他文件类型
+                    mediaEl.className = 'preview-icon';
+                    mediaEl.textContent = '📄';
+                }
+
+                col.appendChild(mediaEl);
+
+                // 文件信息
+                const infoEl = document.createElement('div');
+                infoEl.className = 'preview-info';
+                infoEl.innerHTML = `
+                    <div class="info-row"><label>KIND</label><span>${fileType || 'File'}</span></div>
+                    <div class="info-row"><label>SIZE</label><span>${sizeStr}</span></div>
+                    <div class="info-row"><label>DATE</label><span>${timeStr}</span></div>
+                    <div class="info-row"><label>VERSIONS</label><span>${versions.length}</span></div>
+                `;
+                col.appendChild(infoEl);
+
+                // 操作按钮
+                const actionsEl = document.createElement('div');
+                actionsEl.className = 'preview-actions';
+
+                const dlBtn = document.createElement('button');
+                dlBtn.className = 'btn primary-btn full-width';
+                dlBtn.textContent = 'DOWNLOAD';
+                dlBtn.onclick = () => downloadWithProgress(fullPath);
+
+                const histBtn = document.createElement('button');
+                histBtn.className = 'btn full-width';
+                histBtn.textContent = 'HISTORY';
+                histBtn.onclick = () => showVersionModalInternal(fullPath, versions);
+
+                actionsEl.appendChild(dlBtn);
+                actionsEl.appendChild(histBtn);
+                col.appendChild(actionsEl);
+
+                return col;
+            }
+
+            // 加载文本预览
+            async function loadTextPreview(container, previewUrl) {
+                container.innerHTML = '<div class="loading-spinner"></div>';
+                try {
+                    const res = await fetch(previewUrl);
+                    if (!res.ok) throw new Error('Failed to load');
+                    const text = await res.text();
+                    
+                    // 创建文本预览区域
+                    const pre = document.createElement('pre');
+                    pre.className = 'text-preview-content';
+                    pre.textContent = text;
+                    
+                    container.innerHTML = '';
+                    container.appendChild(pre);
+                } catch (e) {
+                    container.innerHTML = '<div class="error-text">加载失败: ' + e.message + '</div>';
+                }
+            }
+
+            // --- Context Menu Logic ---
+            function createContextMenu(e, actions) {
+                const old = document.getElementById('contextMenu');
+                if (old) old.remove();
+
+                const menu = document.createElement('div');
+                menu.id = 'contextMenu';
+                menu.className = 'context-menu';
+
+                actions.forEach(act => {
+                    const el = document.createElement('div');
+                    el.className = `ctx-item ${act.danger ? 'danger' : ''}`;
+                    el.textContent = act.label;
+                    el.onclick = (ev) => { 
+                        ev.stopPropagation(); 
+                        act.fn(); 
+                        menu.remove(); 
+                    };
+                    menu.appendChild(el);
+                });
+
+                document.body.appendChild(menu);
+                
+                let x = e.pageX;
+                let y = e.pageY;
+                
+                requestAnimationFrame(() => {
+                    const rect = menu.getBoundingClientRect();
+                    const winW = window.innerWidth;
+                    const winH = window.innerHeight;
+
+                    if (x + rect.width > winW) x -= rect.width;
+                    if (y + rect.height > winH) y -= rect.height;
+
+                    menu.style.left = x + 'px';
+                    menu.style.top = y + 'px';
+                });
+
+                const closer = () => { if(document.body.contains(menu)) menu.remove(); window.removeEventListener('click', closer); };
+                setTimeout(() => window.addEventListener('click', closer), 10);
+            }
+
+            // --- Usage Analysis Logic (Visual) ---
+            function calculateNodeSize(node) {
+                if (Array.isArray(node)) {
+                    if (node.length === 0) return 0;
+                    const latest = node.reduce((prev, curr) => 
+                        new Date(curr.createdAt) > new Date(prev.createdAt) ? curr : prev
+                    );
+                    return latest.size || 0;
+                } else if (node.type === 'folder') {
+                    let total = 0;
+                    for (let key in node.children) {
+                        total += calculateNodeSize(node.children[key]);
+                    }
+                    return total;
+                }
+                return 0;
+            }
+
+            function renderUsageView(node, pathString) {
+                const listEl = document.getElementById('usageList');
+                const chartEl = document.getElementById('usageChart');
+                const totalTextEl = document.getElementById('totalUsageText');
+                const breadcrumbEl = document.getElementById('usageBreadcrumb');
+
+                listEl.innerHTML = '';
+                chartEl.innerHTML = '';
+                breadcrumbEl.innerHTML = '';
+                
+                const parts = pathString === '/' ? [''] : pathString.split('/');
+                if (parts[0] !== '') parts.unshift(''); 
+                
+                let accPath = '';
+                parts.forEach((part, index) => {
+                    if (index === 0) accPath = '/';
+                    else accPath = accPath === '/' ? '/' + part : accPath + '/' + part;
+                    
+                    const span = document.createElement('span');
+                    span.className = 'breadcrumb-item';
+                    span.textContent = part === '' ? 'ROOT' : part;
+                    
+                    const targetPath = accPath; 
+                    span.onclick = () => {
+                        const targetNode = getNodeAtPath(targetPath);
+                        if (targetNode) renderUsageView(targetNode, targetPath);
+                    };
+                    
+                    breadcrumbEl.appendChild(span);
+                    if (index < parts.length - 1) {
+                         const sep = document.createElement('span');
+                         sep.className = 'breadcrumb-sep';
+                         sep.textContent = ' / ';
+                         breadcrumbEl.appendChild(sep);
+                    }
+                });
+
+                const items = [];
+                let totalSize = 0;
+
+                const children = node.children || {};
+                for (let name in children) {
+                    const childNode = children[name];
+                    const size = calculateNodeSize(childNode);
+                    const isFolder = !Array.isArray(childNode);
+                    items.push({ name, size, isFolder, node: childNode });
+                    totalSize += size;
+                }
+
+                items.sort((a, b) => b.size - a.size);
+                totalTextEl.textContent = formatBytes(totalSize);
+
+                const colors = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6b7280'];
+                const topItems = items.slice(0, 5);
+                const otherItems = items.slice(5);
+                const otherSize = otherItems.reduce((acc, cur) => acc + cur.size, 0);
+
+                const chartData = [...topItems];
+                if (otherSize > 0) {
+                    chartData.push({ name: 'Others', size: otherSize, isFolder: true, isOther: true });
+                }
+
+                let cumulativePercent = 0;
+                if (totalSize === 0) {
+                    const bgCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    bgCircle.setAttribute('cx', '50'); bgCircle.setAttribute('cy', '50'); bgCircle.setAttribute('r', '40');
+                    bgCircle.setAttribute('fill', 'transparent'); bgCircle.setAttribute('stroke', '#333'); bgCircle.setAttribute('stroke-width', '10');
+                    chartEl.appendChild(bgCircle);
+                } else {
+                    chartData.forEach((item, index) => {
+                        const percent = item.size / totalSize;
+                        if (percent < 0.001) return;
+
+                        const startPercent = cumulativePercent;
+                        cumulativePercent += percent;
+                        const color = colors[index % colors.length];
+                        
+                        const startX = 50 + 40 * Math.cos(2 * Math.PI * startPercent);
+                        const startY = 50 + 40 * Math.sin(2 * Math.PI * startPercent);
+                        const endX = 50 + 40 * Math.cos(2 * Math.PI * cumulativePercent);
+                        const endY = 50 + 40 * Math.sin(2 * Math.PI * cumulativePercent);
+                        const largeArcFlag = percent > 0.5 ? 1 : 0;
+                        
+                        if (percent > 0.9999) {
+                            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                            circle.setAttribute('cx', '50'); circle.setAttribute('cy', '50'); circle.setAttribute('r', '40');
+                            circle.setAttribute('fill', 'transparent'); circle.setAttribute('stroke', color); circle.setAttribute('stroke-width', '10');
+                            chartEl.appendChild(circle);
+                        } else {
+                            const pathData = `M ${startX} ${startY} A 40 40 0 ${largeArcFlag} 1 ${endX} ${endY}`;
+                            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                            path.setAttribute('d', pathData); path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '10');
+                            chartEl.appendChild(path);
+                        }
+                    });
+                }
+
+                topItems.forEach((item, index) => {
+                    const percent = (totalSize > 0) ? (item.size / totalSize * 100).toFixed(1) : 0;
+                    const color = colors[index % colors.length];
+                    const icon = item.isFolder ? '📁' : '📄';
+                    const arrow = item.isFolder ? '<span style="margin-left:auto;color:#666">›</span>' : '';
+                    
+                    const li = document.createElement('li');
+                    li.className = 'usage-item';
+                    if (item.isFolder) li.classList.add('clickable-folder');
+
+                    li.innerHTML = `
+                        <div class="usage-item-header">
+                            <span class="usage-name"><span class="usage-color-dot" style="background:${color}"></span>${icon} ${item.name}</span>
+                            <span class="usage-size">${formatBytes(item.size)}</span>
+                            ${arrow}
+                        </div>
+                        <div class="usage-bar-bg"><div class="usage-bar-fill" style="width: ${percent}%; background: ${color}"></div></div>
+                    `;
+                    
+                    if (item.isFolder) {
+                        li.onclick = () => renderUsageView(item.node, pathString === '/' ? '/' + item.name : pathString + '/' + item.name);
+                    } else {
+                        li.onclick = () => {
+                            document.getElementById('usageModal').style.display = 'none';
+                            currentPath = pathString === '/' ? '/' + item.name : pathString + '/' + item.name;
+                            renderColumns();
+                        };
+                    }
+                    listEl.appendChild(li);
+                });
+
+                if (otherSize > 0) {
+                    const percent = (otherSize / totalSize * 100).toFixed(1);
+                    const color = colors[5];
+                    const li = document.createElement('li');
+                    li.className = 'usage-item muted';
+                    li.innerHTML = `
+                        <div class="usage-item-header">
+                            <span class="usage-name"><span class="usage-color-dot" style="background:${color}"></span>📦 Others</span>
+                            <span class="usage-size">${formatBytes(otherSize)}</span>
+                        </div>
+                        <div class="usage-bar-bg"><div class="usage-bar-fill" style="width: ${percent}%; background: ${color}"></div></div>
+                    `;
+                    listEl.appendChild(li);
+                }
+
+                if (items.length === 0) listEl.innerHTML = '<li class="empty-msg">EMPTY</li>';
+            }
+
+            function showUsageAnalysis() {
+                renderUsageView(fsRoot, '/');
+                document.getElementById('usageModal').style.display = 'flex';
+            }
+
+            document.getElementById('usageInfo').onclick = showUsageAnalysis;
+            document.getElementById('usageModalClose').onclick = () => { document.getElementById('usageModal').style.display = 'none'; };
+
+
+            // --- History Modal ---
+
+            function showVersionModalInternal(path, versions) {
+                const modal = document.getElementById('versionModal');
+                const list = document.getElementById('versionList');
+                const title = document.getElementById('versionModalTitle');
+                
+                title.textContent = path.split('/').pop();
+                list.innerHTML = '';
+                
+                const sortedVersions = [...versions].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+                
+                sortedVersions.forEach((v, idx) => {
+                    const li = document.createElement('li');
+                    li.className = 'version-item';
+                    const isLatest = idx === 0;
+                    
+                    li.addEventListener('contextmenu', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        const actions = [
+                            {
+                                label: 'Rename Version...',
+                                fn: async () => {
+                                    const newName = await showInputModal({
+                                        title: 'RENAME VERSION',
+                                        message: 'New version name (empty to clear):',
+                                        defaultValue: v.name || ''
+                                    });
+                                    if(newName === null) return;
+                                    
+                                    try {
+                                        setStatus('RENAMING VERSION...');
+                                        const res = await fetch(API_BASE_URL + '/api/rename-version', {
+                                            method: 'POST',
+                                            headers: {'Content-Type': 'application/json'},
+                                            body: JSON.stringify({ filePath: path, createdAt: v.createdAt, name: newName })
+                                        });
+                                        const j = await res.json();
+                                        if(!j.ok) throw new Error(j.error || 'Unknown error');
+                                        
+                                        await showInputModal({ title: 'SUCCESS', message: 'Version Renamed', isConfirm: true });
+                                        modal.style.display = 'none';
+                                        fetchTree(); 
+                                    } catch(e) { 
+                                        await showInputModal({ title: 'ERROR', message: e.message, isConfirm: true, danger: true });
+                                    }
+                                }
+                            }
+                        ];
+                        
+                        if (!isLatest) {
+                            actions.push({
+                                label: 'Delete Version',
+                                danger: true,
+                                fn: async () => {
+                                    const confirm = await showInputModal({
+                                        title: 'DELETE VERSION',
+                                        message: 'Delete this version permanently?',
+                                        isConfirm: true,
+                                        danger: true
+                                    });
+                                    if(confirm) {
+                                        try {
+                                            setStatus('DELETING VERSION...');
+                                            const res = await fetch(API_BASE_URL + '/api/clean-versions', {
+                                                method: 'POST',
+                                                headers: {'Content-Type': 'application/json'},
+                                                body: JSON.stringify({ path, target: v.createdAt })
+                                            });
+                                            const j = await res.json();
+                                            if(!j.ok) throw new Error(j.error || 'Unknown error');
+                                            
+                                            await showInputModal({ title: 'SUCCESS', message: 'Version Deleted', isConfirm: true });
+                                            modal.style.display = 'none';
+                                            fetchTree();
+                                        } catch(e) { 
+                                            await showInputModal({ title: 'ERROR', message: e.message, isConfirm: true, danger: true });
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        
+                        createContextMenu(e, actions);
+                    });
+
+                    let nameHtml = '';
+                    if (v.name) nameHtml = `<div class="v-name">${v.name}</div>`;
+
+                    li.innerHTML = `
+                        <div class="v-info">
+                            ${nameHtml}
+                            <div class="v-date">${formatDate(v.createdAt)} ${isLatest?'<span class="tag">LATEST</span>':''}</div>
+                            <div class="v-meta">${formatBytes(v.size)}</div>
+                        </div>
+                        <button class="btn small-btn">DL</button>
+                    `;
+                    
+                    li.querySelector('button').onclick = (ev) => {
+                        ev.stopPropagation();
+                        downloadWithProgress(path, v.createdAt);
+                    };
+
+                    list.appendChild(li);
+                });
+                
+                document.getElementById('cleanHistoryBtn').onclick = async () => {
+                     const confirm = await showInputModal({
+                         title: 'CLEAN HISTORY',
+                         message: 'DELETE ALL OLD VERSIONS? This cannot be undone.',
+                         isConfirm: true,
+                         danger: true
+                     });
+                     if(confirm) {
+                         try {
+                             await fetch(`${API_BASE_URL}/api/clean-versions`, {
+                                 method:'POST',
+                                 headers:{'Content-Type':'application/json'},
+                                 body: JSON.stringify({ path })
+                             });
+                             await showInputModal({ title: 'SUCCESS', message: 'History Cleaned', isConfirm: true });
+                             modal.style.display = 'none';
+                             fetchTree();
+                         } catch(e) { alert('Error: ' + e.message); }
+                     }
+                };
+
+                modal.style.display = 'flex';
+            }
+
+            function openLightboxInternal(url, type) {
+                const ol = document.getElementById('lightboxOverlay');
+                const ct = document.getElementById('lightboxContent');
+                ct.innerHTML = '';
+                if(type === 'image') ct.innerHTML = `<img src="${url}">`;
+                ol.style.display = 'flex';
+            }
+
+            // --- Main Context Menu ---
+            function openContextMenu(e, path, item) {
+                const isFile = Array.isArray(item);
+                const actions = [];
+
+                if (!isFile) { 
+                    actions.push({ label: 'Open', fn: () => { currentPath = path; renderColumns(); } });
+                    actions.push({ label: 'Rename', fn: () => promptRename(path) });
+                    actions.push({ label: 'Delete', danger: true, fn: () => confirmDelete(path) });
+                } else { 
+                    actions.push({ 
+                        label: 'Download', 
+                        fn: () => downloadWithProgress(path) 
+                    });
+                    actions.push({ label: 'Rename', fn: () => promptRename(path) });
+                    actions.push({ label: 'History', fn: () => showVersionModalInternal(path, item) });
+                    actions.push({ label: 'Delete', danger: true, fn: () => confirmDelete(path) });
+                }
+                
+                createContextMenu(e, actions);
+            }
+
+            // --- Search Functionality ---
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                const q = e.target.value.trim().toLowerCase();
+                const existingOverlay = document.getElementById('searchOverlay');
+                if (existingOverlay) existingOverlay.remove();
+
+                if (!q) { renderColumns(); return; }
+
+                const overlay = document.createElement('div');
+                overlay.id = 'searchOverlay';
+                overlay.className = 'search-overlay';
+                
+                const ul = document.createElement('ul');
+                ul.className = 'search-results-list';
+
+                const results = [];
+                function traverse(node, path) {
+                    const children = node.children || {};
+                    for (const key in children) {
+                        const item = children[key];
+                        const itemPath = path === '/' ? '/' + key : path + '/' + key;
+                        if (key.toLowerCase().includes(q)) {
+                            results.push({ name: key, path: itemPath, node: item });
+                        }
+                        if (item.type === 'folder') {
+                            traverse(item, itemPath);
+                        }
+                    }
+                }
+                traverse(fsRoot, '/');
+
+                if (results.length === 0) {
+                    ul.innerHTML = '<li class="search-item muted">NO RESULTS FOUND</li>';
+                } else {
+                    results.forEach(res => {
+                        const li = document.createElement('li');
+                        li.className = 'search-item';
+                        const typeIcon = Array.isArray(res.node) ? '📄' : '📁';
+                        li.innerHTML = `
+                            <span class="search-icon">${typeIcon}</span>
+                            <div class="search-text">
+                                <div class="search-name">${res.name}</div>
+                                <div class="search-path">${res.path}</div>
+                            </div>
+                        `;
+                        li.onclick = () => {
+                            currentPath = res.path;
+                            document.getElementById('searchInput').value = '';
+                            overlay.remove();
+                            renderColumns();
+                        };
+                        ul.appendChild(li);
+                    });
+                }
+                
+                overlay.appendChild(ul);
+                columnsContainer.appendChild(overlay);
+            });
+
+            // --- Actions (Updated to use showInputModal) ---
+            
+            async function confirmDelete(path) {
+                const confirm = await showInputModal({
+                    title: 'DELETE',
+                    message: `DELETE PERMANENTLY?\n${path}`,
+                    isConfirm: true,
+                    danger: true
+                });
+
+                if (confirm) {
+                    try {
+                        setStatus('DELETING...');
+                        await fetch(API_BASE_URL + '/api/remove', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path })
+                        });
+                        const parts = path.split('/');
+                        parts.pop();
+                        const parent = parts.join('/') || '/';
+                        if (currentPath === path || currentPath.startsWith(path)) {
+                            currentPath = parent;
+                        }
+                        await fetchTree();
+                    } catch(e) { 
+                        await showInputModal({ title: 'ERROR', message: e.message, isConfirm: true, danger: true });
+                    }
+                }
+            }
+
+            async function promptRename(src) {
+                const name = src.split('/').pop();
+                const newName = await showInputModal({
+                    title: 'RENAME',
+                    message: 'RENAME TO:',
+                    defaultValue: name
+                });
+                
+                if (!newName || newName === name) return;
+                
+                const parts = src.split('/');
+                parts.pop();
+                const dest = (parts.join('/') === '' ? '' : parts.join('/')) + '/' + newName;
+                
+                setStatus('RENAMING...');
+                try {
+                    await fetch(API_BASE_URL + '/api/rename', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ src, dest })
+                    });
+                    if (currentPath === src) currentPath = dest;
+                    await fetchTree();
+                } catch(e) { 
+                    await showInputModal({ title: 'ERROR', message: e.message, isConfirm: true, danger: true });
+                }
+            }
+
+            async function createFolder() {
+                let targetDir = currentPath;
+                const node = getNodeAtPath(currentPath);
+                if (Array.isArray(node)) { 
+                    targetDir = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
+                }
+
+                const name = await showInputModal({
+                    title: 'NEW FOLDER',
+                    message: 'NEW FOLDER NAME:'
+                });
+                
+                if (!name) return;
+                const path = targetDir === '/' ? '/' + name : targetDir + '/' + name;
+                
+                setStatus('CREATING...');
+                try {
+                    await fetch(API_BASE_URL + '/api/mkdir', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ path, view: 'list' })
+                    });
+                    currentPath = path; 
+                    await fetchTree();
+                } catch(e) { 
+                    await showInputModal({ title: 'ERROR', message: e.message, isConfirm: true, danger: true });
+                }
+            }
+            
+            // --- Upload Logic (Updated for Task Progress) ---
+            const fileInput = document.getElementById('fileInput');
+            const progressOverlay = document.getElementById('progressOverlay');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
+
+            document.getElementById('uploadBtnTop').onclick = () => {
+                let targetDir = currentPath;
+                const node = getNodeAtPath(currentPath);
+                if (Array.isArray(node)) { 
+                     targetDir = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
+                }
+                fileInput.setAttribute('data-target', targetDir);
+                fileInput.click();
+            };
+
+            fileInput.onchange = async (e) => {
+                const targetDir = fileInput.getAttribute('data-target') || '/';
+                const files = e.target.files;
+                if (!files.length) return;
+                
+                progressOverlay.style.display = 'flex';
+                uploading = true;
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    await uploadSingleFile(file, targetDir, i + 1, files.length);
+                }
+                
+                uploading = false;
+                setTimeout(() => { progressOverlay.style.display = 'none'; }, 1000);
+                fileInput.value = '';
+                if (currentPath !== targetDir && !currentPath.startsWith(targetDir)) {
+                     currentPath = targetDir;
+                }
+                await fetchTree();
+            };
+
+            async function uploadSingleFile(file, dir, currentIdx, totalCount) {
+                let uploadId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+                
+                // 1. Local Upload Phase
+                for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+                    const start = chunkIdx * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, file.size);
+                    const chunk = file.slice(start, end);
+                    const formData = new FormData();
+                    formData.append('chunk', chunk, file.name);
+                    
+                    progressText.textContent = `Local Upload: ${file.name} (Part ${chunkIdx+1}/${totalChunks})`;
+                    const overallPercent = Math.round(((chunkIdx / totalChunks) * 100));
+                    progressBar.style.width = overallPercent + '%';
+                    progressPercent.textContent = overallPercent + '%';
+
+                    try {
+                        await axios.post(`${API_BASE_URL}/api/upload-chunk/${uploadId}/${chunkIdx}`, formData);
+                    } catch (e) {
+                        console.error(e);
+                        setStatus('Local Upload Failed: ' + file.name);
+                        return; 
+                    }
+                }
+
+                // 2. Cloudflare Merge & Upload Phase (Task based)
+                progressOverlay.style.display = 'none'; 
+                try {
+                    const res = await axios.post(`${API_BASE_URL}/api/upload-complete`, {
+                        uploadId, filename: file.name, remotePath: dir
+                    });
+                    
+                    if (res.data.ok && res.data.taskId) {
+                        await showTaskProgressModal(res.data.taskId, `Uploading ${file.name} to Cloudflare...`);
+                    } else {
+                        alert('Merge failed on server.');
+                    }
+                } catch (e) {
+                    alert('Upload Complete Request Failed: ' + e.message);
+                }
+            }
+
+            // Event Bindings
+            document.getElementById('refreshBtn').onclick = fetchTree;
+            document.getElementById('newFolderBtn').onclick = createFolder;
+            document.getElementById('versionModalClose').onclick = () => document.getElementById('versionModal').style.display = 'none';
+            document.getElementById('lightboxClose').onclick = () => document.getElementById('lightboxOverlay').style.display = 'none';
+            document.getElementById('openSite').onclick = () => window.open(MAIN_PROJECT_URL + '/main.json');
+            
+            // Initial
+            fetchTree();
+        });
+    </script>
+</body>
+</html>
