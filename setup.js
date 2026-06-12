@@ -120,7 +120,7 @@ async function getProjectUrl(token, accountId, projectName) {
   const data = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}`);
   const subdomain = data.result?.subdomain || data.result?.canonical_deployment?.subdomain;
   if (subdomain) {
-    return `https://${subdomain}.pages.dev`;
+    return subdomain.includes('.pages.dev') ? `https://${subdomain}` : `https://${subdomain}.pages.dev`;
   }
   return `https://${projectName}.pages.dev`;
 }
@@ -128,43 +128,73 @@ async function getProjectUrl(token, accountId, projectName) {
 async function deployMainJsonViaApi(token, accountId, projectName, content) {
   const crypto = (await import('crypto')).default;
   const fileBuffer = Buffer.from(content, 'utf-8');
-  const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-  const fileSize = fileBuffer.length;
+  const remotePath = '/main.json';
+  const hash = crypto.createHash('md5').update(fileBuffer).update(remotePath).digest('hex');
 
   console.log(`部署 main.json 到 ${projectName}...`);
 
-  // Step 1: 获取上传凭证
-  const uploadResult = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/assets/upload`);
-  const jwt = uploadResult.result?.jwt;
+  // Step 1: 获取上传 JWT
+  const tokenResult = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/upload-token`);
+  const jwt = tokenResult.result?.jwt;
   if (!jwt) throw new Error('获取上传凭证失败');
 
-  // Step 2: 上传文件
-  const uploadResponse = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/assets/upload`, {
+  // Step 2: 上传文件 (base64)
+  const base64Content = fileBuffer.toString('base64');
+  const uploadResponse = await fetch('https://api.cloudflare.com/client/v4/pages/assets/upload', {
     method: 'POST',
-    body: {
-      jwt,
-      assets: [{ name: 'main.json', sha256: fileHash, size: fileSize }]
-    }
+    headers: {
+      'Authorization': `Bearer ${jwt}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify([{
+      key: hash,
+      value: base64Content,
+      metadata: { contentType: 'application/json' },
+      base64: true
+    }])
   });
+  const uploadData = await uploadResponse.json();
+  if (!uploadData.success) {
+    const errors = uploadData.errors?.map(e => e.message).join('; ') || 'Unknown error';
+    throw new Error(`上传文件失败: ${errors}`);
+  }
 
-  const uploadUrl = uploadResponse.result?.assets?.[0]?.uploadURL;
-  if (!uploadUrl) throw new Error('获取上传 URL 失败');
-
-  await fetch(uploadUrl, {
-    method: 'PUT',
-    body: fileBuffer,
-    headers: { 'Content-Type': 'application/json' }
-  });
-
-  // Step 3: 创建部署
-  await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/deployments`, {
+  // Step 3: 注册哈希
+  const hashResponse = await fetch('https://api.cloudflare.com/client/v4/pages/assets/upsert-hashes', {
     method: 'POST',
-    body: {
-      assets: {
-        'main.json': { sha256: fileHash, size: fileSize }
-      }
-    }
+    headers: {
+      'Authorization': `Bearer ${jwt}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ hashes: [hash] })
   });
+  const hashData = await hashResponse.json();
+  if (!hashData.success) {
+    const errors = hashData.errors?.map(e => e.message).join('; ') || 'Unknown error';
+    throw new Error(`注册哈希失败: ${errors}`);
+  }
+
+  // Step 4: 创建部署 (multipart/form-data)
+  const manifest = JSON.stringify({ [remotePath]: hash });
+  const boundary = '----CloudfilesSetup' + crypto.randomBytes(16).toString('hex');
+  const body = `--${boundary}\r\nContent-Disposition: form-data; name="manifest"\r\nContent-Type: application/json\r\n\r\n${manifest}\r\n--${boundary}--\r\n`;
+
+  const deployResponse = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}/deployments`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`
+      },
+      body
+    }
+  );
+  const deployData = await deployResponse.json();
+  if (!deployData.success) {
+    const errors = deployData.errors?.map(e => e.message).join('; ') || 'Unknown error';
+    throw new Error(`创建部署失败: ${errors}`);
+  }
 
   console.log('✓ main.json 部署成功');
 }
