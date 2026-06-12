@@ -40,6 +40,9 @@ jobs:
       - name: Build installer
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
+          Write-Host "Working dir: $(Get-Location)"
+          Write-Host "dist\cloudfiles contents:"
+          Get-ChildItem -Path "dist\cloudfiles" -Recurse | Select-Object -First 20 | ForEach-Object { Write-Host $_.FullName }
           makensis /DVERSION=$version installer/cloudfiles.nsi
         shell: pwsh
 
