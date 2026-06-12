@@ -23,6 +23,7 @@
     "execa": "^9.6.0",
     "exifreader": "^4.32.0",
     "express": "^5.1.0",
+    "form-data": "^4.0.5",
     "fs": "^0.0.1-security",
     "heic-convert": "^2.1.0",
     "mime-types": "^3.0.1",

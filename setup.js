@@ -175,9 +175,11 @@ async function deployMainJsonViaApi(token, accountId, projectName, content) {
   }
 
   // Step 4: 创建部署 (multipart/form-data)
-  const manifest = JSON.stringify({ [remotePath]: hash });
-  const boundary = '----CloudfilesSetup' + crypto.randomBytes(16).toString('hex');
-  const body = `--${boundary}\r\nContent-Disposition: form-data; name="manifest"\r\nContent-Type: application/json\r\n\r\n${manifest}\r\n--${boundary}--\r\n`;
+  const { default: FormData } = await import('form-data');
+  const form = new FormData();
+  form.append('manifest', JSON.stringify({ [remotePath]: hash }), {
+    contentType: 'application/json'
+  });
 
   const deployResponse = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${projectName}/deployments`,
@@ -185,9 +187,9 @@ async function deployMainJsonViaApi(token, accountId, projectName, content) {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`
+        ...form.getHeaders()
       },
-      body
+      body: form
     }
   );
   const deployData = await deployResponse.json();
