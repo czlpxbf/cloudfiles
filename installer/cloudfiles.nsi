@@ -10,7 +10,6 @@
 ; ========================================
 
 !define APPNAME "Cloudfiles"
-!define APPNAME_LOWERCASE "cloudfiles"
 !ifndef VERSION
   !define VERSION "2.0.0"
 !endif
@@ -21,10 +20,7 @@ Name "${APPNAME} ${VERSION}"
 OutFile "Cloudfiles-Setup-${VERSION}.exe"
 Unicode true
 
-; 安装到用户目录，避免权限问题（应用需要在安装目录写入数据）
 InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
-
-; 请求管理员权限（用于创建快捷方式）
 RequestExecutionLevel user
 
 ; ========================================
@@ -52,18 +48,13 @@ Section "Install" SecInstall
 
   SetOutPath $INSTDIR
 
-  ; 复制所有文件（排除 config.js，升级时保留用户配置）
-  File /r /x "config.js" "dist\cloudfiles\*"
-
-  ; config.js 仅在首次安装时写入
-  SetOverwrite off
-  File "dist\cloudfiles\lib\config.js"
-  SetOverwrite on
+  ; 复制所有文件
+  File /r "dist\cloudfiles\*.*"
 
   ; 创建开始菜单快捷方式
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\Cloudfiles Server.lnk" "$INSTDIR\Cloudfiles Server.bat" "" "$INSTDIR\Cloudfiles Server.bat" 0
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\Cloudfiles Setup.lnk" "$INSTDIR\Cloudfiles Setup.bat" "" "$INSTDIR\Cloudfiles Setup.bat" 0
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\Cloudfiles Server.lnk" "$INSTDIR\Cloudfiles Server.bat"
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\Cloudfiles Setup.lnk" "$INSTDIR\Cloudfiles Setup.bat"
   CreateShortcut "$SMPROGRAMS\${APPNAME}\Uninstall.lnk" "$INSTDIR\uninstall.exe"
 
   ; 创建桌面快捷方式
@@ -98,7 +89,7 @@ Section "Uninstall"
   RMDir "$SMPROGRAMS\${APPNAME}"
   Delete "$DESKTOP\Cloudfiles Server.lnk"
 
-  ; 删除应用文件（保留用户数据目录）
+  ; 删除应用文件
   Delete "$INSTDIR\server.js"
   Delete "$INSTDIR\main.js"
   Delete "$INSTDIR\setup.js"
@@ -113,10 +104,7 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\index"
   RMDir /r "$INSTDIR\node_modules"
 
-  ; 保留用户数据目录（download, update, chunks, preview_cache 等）
-  ; 如果用户希望完全清除，可手动删除安装目录
-
-  ; 清理空目录
+  ; 保留用户数据目录
   RMDir "$INSTDIR"
 
   ; 删除注册表
