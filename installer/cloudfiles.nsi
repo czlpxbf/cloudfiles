@@ -31,9 +31,6 @@ RequestExecutionLevel user
 ; 界面配置
 ; ========================================
 
-!define MUI_ICON "dist\cloudfiles\index\favicon.ico"
-!define MUI_UNICON "dist\cloudfiles\index\favicon.ico"
-
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
