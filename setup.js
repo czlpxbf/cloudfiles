@@ -120,7 +120,7 @@ async function getProjectUrl(token, accountId, projectName) {
   const data = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}`);
   const subdomain = data.result?.subdomain || data.result?.canonical_deployment?.subdomain;
   if (subdomain) {
-    return `https://${subdomain}.pages.dev`;
+    return subdomain.includes('.pages.dev') ? `https://${subdomain}` : `https://${subdomain}.pages.dev`;
   }
   return `https://${projectName}.pages.dev`;
 }
