@@ -33,6 +33,10 @@ jobs:
       - name: Install NSIS
         run: choco install nsis -y
 
+      - name: Refresh PATH
+        run: echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
       - name: Build installer
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
