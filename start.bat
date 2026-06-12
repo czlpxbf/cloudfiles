@@ -4,7 +4,7 @@ title Cloudfiles Server
 
 echo.
 echo ========================================
-echo   Cloudfiles v1.0.0
+echo   Cloudfiles v2.0.0
 echo ========================================
 echo.
 

@@ -4,7 +4,7 @@ title Cloudfiles Setup
 
 echo.
 echo ========================================
-echo   Cloudfiles Setup v1.0.0
+echo   Cloudfiles Setup v2.0.0 (API Mode)
 echo ========================================
 echo.
 

@@ -1,7 +1,7 @@
 {
   "name": "cloudfiles",
-  "version": "1.0.0",
-  "description": "Cloudfiles - A modern cloud storage solution built on Cloudflare Pages. Provides unlimited file storage with version history, beautiful web interface, and powerful file management capabilities.",
+  "version": "2.0.0",
+  "description": "Cloudfiles - 无限云存储解决方案，基于 Cloudflare Pages REST API。无需 Wrangler CLI，纯 API Token 配置，提供文件版本管理、Web 界面和 CLI 工具。",
   "author": "Cloudfiles Team",
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,8 @@
     "storage",
     "cloud",
     "file-manager",
-    "version-control"
+    "version-control",
+    "api"
   ],
   "repository": {
     "type": "git",

@@ -1,15 +1,11 @@
 @echo off
 echo.
 echo ========================================
-echo   Cloudfiles Logout
+echo   Cloudfiles Logout v2.0.0
 echo ========================================
 echo.
 
-echo [1/2] Logging out from Cloudflare...
-wrangler logout
-
-echo.
-echo [2/2] Resetting config.js...
+echo [1/1] Resetting config.js...
 
 (
 echo // lib/config.js
@@ -27,13 +23,19 @@ echo // ========================================
 echo // User Configuration - Please modify
 echo // ========================================
 echo
-echo // Main project name (Cloudflare Pages project name)
+echo // Cloudflare API Token
+echo export const CLOUDFLARE_API_TOKEN = 'your-api-token';
+echo
+echo // Cloudflare Account ID
+echo export const CLOUDFLARE_ACCOUNT_ID = '';
+echo
+echo // Main project name
 echo export const MAIN_PROJECT_NAME = 'your-project-name';
 echo
-echo // Data project name (for storing file data)
+echo // Data project name
 echo export const DATA_PROJECT_NAME = 'your-project-name-data';
 echo
-echo // Main project URL (Cloudflare Pages domain)
+echo // Main project URL
 echo export const MAIN_PROJECT_URL = 'https://your-project-name.pages.dev';
 echo
 echo // ========================================
@@ -49,7 +51,6 @@ echo export const TEMP_SITE_DIR = path.join(PROJECT_ROOT, 'temp-cloudfiles-site'
 echo export const TEMP_CHUNK_DIR = path.join(PROJECT_ROOT, 'temp-chunk-upload');
 echo export const MAX_RETRIES = 5;
 echo
-echo // Worker pool size, default is half of CPU cores, max 8, min 1
 echo export const MAX_WORKERS = Math.max(1, Math.min(8, Math.floor(os.cpus().length / 2) || 1));
 echo export const DISTRIBUTED_ARCHITECTURE = false;
 ) > "%~dp0lib\config.js"
