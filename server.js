@@ -15,7 +15,7 @@ import * as config from './lib/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const serverversion = "v1.0.0"; 
+const serverversion = "v2.0.0"; 
 const PORT = 8000; 
 
 // Use paths from config.js

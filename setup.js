@@ -1,31 +1,27 @@
 /**
- * Cloudfiles Setup Script v1.0.0
+ * Cloudfiles Setup Script v2.0.0
+ * 
+ * 使用 Cloudflare REST API 替代 Wrangler CLI
+ * 用户只需提供 API Token，无需安装任何额外工具
  * 
  * This script will:
- * - Login to Cloudflare
+ * - Verify Cloudflare API Token
  * - Create Pages projects (or use existing)
- * - Get actual production URL from deployment output
+ * - Get production URL
  * - Update config.js
  * - Deploy initial main.json (only for NEW projects)
  * 
- * IMPORTANT WARNINGS:
- * - This project uses Cloudflare Pages for storage (free tier)
- * - Use a secondary Cloudflare account (NOT your main account)
- * - Do NOT store important files without backup
- * 
  * Prerequisites:
  * - Node.js >= 18.0.0
- * - Wrangler CLI (will be auto-installed)
  * - Cloudflare account (free tier works)
+ * - Cloudflare API Token (Pages 编辑权限)
  */
 
-import { execa } from 'execa';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import readline from 'readline';
 
-// Get current script directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = __dirname;
@@ -41,32 +37,152 @@ function question(prompt) {
   });
 }
 
-async function runCommand(command, args) {
-  console.log(`\n▶ Running: ${command} ${args.join(' ')}`);
-  const childProc = execa(command, args, { stdio: 'inherit' });
-  await childProc;
+// ========================================
+// Cloudflare API 工具函数 (内联，避免循环依赖)
+// ========================================
+
+const API_BASE = 'https://api.cloudflare.com/client/v4';
+
+async function cloudflareRequest(token, endpoint, options = {}) {
+  const { method = 'GET', body } = options;
+  
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  };
+
+  const fetchOptions = {
+    method,
+    headers
+  };
+
+  if (body) {
+    fetchOptions.body = JSON.stringify(body);
+  }
+
+  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  const response = await fetch(url, fetchOptions);
+  const data = await response.json();
+
+  if (!data.success) {
+    const errors = data.errors?.map(e => e.message).join('; ') || 'Unknown error';
+    throw new Error(`API 错误: ${errors}`);
+  }
+
+  return data;
 }
 
-async function runCommandCapture(command, args) {
+async function verifyToken(token) {
+  console.log('验证 API Token...');
+  const data = await cloudflareRequest(token, '/user/tokens/verify');
+  return data.result;
+}
+
+async function getAccountId(token) {
+  console.log('获取账号信息...');
+  const data = await cloudflareRequest(token, '/accounts');
+  const accounts = data.result;
+  if (accounts.length === 0) {
+    throw new Error('未找到 Cloudflare 账号');
+  }
+  if (accounts.length === 1) {
+    return accounts[0].id;
+  }
+  // 多账号，让用户选择
+  console.log('\n发现多个 Cloudflare 账号:');
+  accounts.forEach((a, i) => console.log(`  ${i + 1}. ${a.name} (${a.id})`));
+  const choice = await question(`请选择账号 (1-${accounts.length}): `);
+  const idx = parseInt(choice) - 1;
+  if (idx < 0 || idx >= accounts.length) {
+    throw new Error('无效选择');
+  }
+  return accounts[idx].id;
+}
+
+async function listProjects(token, accountId) {
+  const data = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects`);
+  return data.result.map(p => p.name);
+}
+
+async function createProject(token, accountId, projectName) {
+  console.log(`创建 Pages 项目: ${projectName}`);
+  await cloudflareRequest(token, `/accounts/${accountId}/pages/projects`, {
+    method: 'POST',
+    body: {
+      name: projectName,
+      production_branch: 'main'
+    }
+  });
+}
+
+async function getProjectUrl(token, accountId, projectName) {
+  console.log(`获取项目 URL: ${projectName}`);
+  const data = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}`);
+  const subdomain = data.result?.subdomain || data.result?.canonical_deployment?.subdomain;
+  if (subdomain) {
+    return `https://${subdomain}.pages.dev`;
+  }
+  return `https://${projectName}.pages.dev`;
+}
+
+async function deployMainJsonViaApi(token, accountId, projectName, content) {
+  const crypto = (await import('crypto')).default;
+  const fileBuffer = Buffer.from(content, 'utf-8');
+  const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+  const fileSize = fileBuffer.length;
+
+  console.log(`部署 main.json 到 ${projectName}...`);
+
+  // Step 1: 获取上传凭证
+  const uploadResult = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/assets/upload`);
+  const jwt = uploadResult.result?.jwt;
+  if (!jwt) throw new Error('获取上传凭证失败');
+
+  // Step 2: 上传文件
+  const uploadResponse = await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/assets/upload`, {
+    method: 'POST',
+    body: {
+      jwt,
+      assets: [{ name: 'main.json', sha256: fileHash, size: fileSize }]
+    }
+  });
+
+  const uploadUrl = uploadResponse.result?.assets?.[0]?.uploadURL;
+  if (!uploadUrl) throw new Error('获取上传 URL 失败');
+
+  await fetch(uploadUrl, {
+    method: 'PUT',
+    body: fileBuffer,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  // Step 3: 创建部署
+  await cloudflareRequest(token, `/accounts/${accountId}/pages/projects/${projectName}/deployments`, {
+    method: 'POST',
+    body: {
+      assets: {
+        'main.json': { sha256: fileHash, size: fileSize }
+      }
+    }
+  });
+
+  console.log('✓ main.json 部署成功');
+}
+
+async function checkMainJsonExists(projectUrl) {
   try {
-    const { stdout, stderr } = await execa(command, args, { reject: false });
-    return { stdout, stderr, success: true };
-  } catch (error) {
-    return { stdout: '', stderr: error.message, success: false };
+    const response = await fetch(`${projectUrl}/main.json`, { method: 'HEAD' });
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 
-// Run command and capture output (for getting deployment URL)
-async function runCommandCaptureOutput(command, args) {
-  try {
-    const { stdout } = await execa(command, args, { stdio: 'pipe' });
-    return stdout;
-  } catch (error) {
-    return '';
-  }
-}
+// ========================================
+// 配置更新
+// ========================================
 
-function updateConfig(mainProject, dataProject, mainUrl) {
+function updateConfig(token, accountId, mainProject, dataProject, mainUrl) {
   const configPath = path.join(PROJECT_ROOT, 'lib', 'config.js');
   
   const configContent = `// lib/config.js
@@ -88,6 +204,14 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 // ========================================
 // User Configuration (Auto-generated)
 // ========================================
+
+// [CUSTOMIZE] Cloudflare API Token (需要 Pages 编辑权限)
+// 获取方式: https://dash.cloudflare.com/profile/api-tokens
+export const CLOUDFLARE_API_TOKEN = '${token}';
+
+// [CUSTOMIZE] Cloudflare Account ID (可选，留空则自动检测)
+// 获取方式: https://dash.cloudflare.com → 右侧 API 区域
+export const CLOUDFLARE_ACCOUNT_ID = '${accountId}';
 
 // [CUSTOMIZE] Main project name (Cloudflare Pages project name)
 export const MAIN_PROJECT_NAME = '${mainProject}';
@@ -115,219 +239,75 @@ export const MAX_WORKERS = Math.max(1, Math.min(8, Math.floor(os.cpus().length /
 export const DISTRIBUTED_ARCHITECTURE = false;
 `;
 
+  const libPath = path.join(PROJECT_ROOT, 'lib');
+  if (!fs.existsSync(libPath)) {
+    fs.mkdirSync(libPath, { recursive: true });
+  }
   fs.writeFileSync(configPath, configContent, 'utf8');
-  console.log('✓ config.js updated successfully');
+  console.log('✓ config.js 更新成功');
 }
 
-async function checkLogin() {
-  const result = await runCommandCapture('wrangler', ['whoami']);
-  
-  if (result.stdout.includes('@') || result.stdout.includes('Account')) {
-    return true;
-  }
-  
-  if (result.stderr.includes('not authenticated') || result.stdout.includes('not authenticated')) {
-    return false;
-  }
-  
-  return result.success;
-}
-
-async function getExistingProjects() {
-  const result = await runCommandCapture('wrangler', ['pages', 'project', 'list']);
-  
-  const projects = [];
-  
-  if (result.stdout) {
-    const lines = result.stdout.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      
-      if (!trimmed) continue;
-      if (trimmed.includes('────')) continue;
-      if (trimmed.includes('┌') || trimmed.includes('├') || trimmed.includes('└')) continue;
-      if (trimmed.includes('│')) {
-        const parts = trimmed.split('│').map(p => p.trim()).filter(p => p);
-        if (parts.length > 0) {
-          const name = parts[0];
-          if (name && name !== 'name' && !name.includes('─') && name.length > 0) {
-            projects.push(name);
-          }
-        }
-      } else {
-        const parts = trimmed.split(/\s+/);
-        if (parts.length > 0 && parts[0] && !parts[0].includes('─') && !parts[0].includes('Getting')) {
-          const name = parts[0];
-          if (name.length > 0 && name.length < 100 && !name.startsWith('⛅')) {
-            projects.push(name);
-          }
-        }
-      }
-    }
-  }
-  
-  return projects;
-}
-
-// Extract production URL from preview URL
-// Preview:  https://RANDOM_HASH.project-name.pages.dev
-// Production: https://project-name.pages.dev
-function extractProductionUrl(previewUrl) {
-  try {
-    const url = new URL(previewUrl);
-    const hostname = url.hostname;
-    
-    // Format: randomhash.projectname-suffix.pages.dev
-    const parts = hostname.split('.');
-    
-    if (parts.length >= 4 && parts[0].match(/^[a-f0-9]{8,}$/i)) {
-      // First part is a random hash, remove it
-      parts.shift();
-      const productionHost = parts.join('.');
-      return `https://${productionHost}`;
-    }
-    
-    // Already a production URL
-    return previewUrl;
-  } catch (e) {
-    return previewUrl;
-  }
-}
-
-async function getProjectUrlFromDeployment(projectName) {
-  console.log(`Getting production URL for project: ${projectName}`);
-  
-  // Create a minimal temp file to deploy
-  const tempDir = path.join(PROJECT_ROOT, 'temp-url-check');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  
-  // Create a dummy file
-  fs.writeFileSync(path.join(tempDir, '.keep'), '');
-  
-  try {
-    // Deploy and capture output
-    const output = await runCommandCaptureOutput('wrangler', [
-      'pages', 'deploy', tempDir,
-      '--project-name', projectName,
-      '--branch', 'main'
-    ]);
-    
-    // Look for deployment URL in output
-    const urlMatch = output.match(/https:\/\/[^\s]+\.pages\.dev/);
-    
-    if (urlMatch) {
-      const previewUrl = urlMatch[0];
-      console.log(`Preview URL: ${previewUrl}`);
-      
-      const productionUrl = extractProductionUrl(previewUrl);
-      console.log(`Production URL: ${productionUrl}`);
-      
-      return productionUrl;
-    }
-  } catch (error) {
-    console.log(`Could not get URL from deployment: ${error.message}`);
-  } finally {
-    // Cleanup
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) {}
-  }
-  
-  // Fallback
-  return `https://${projectName}.pages.dev`;
-}
-
-// Check if main.json exists on the project
-async function checkMainJsonExists(mainUrl) {
-  try {
-    const response = await fetch(`${mainUrl}/main.json`, { method: 'HEAD' });
-    return response.ok;
-  } catch (error) {
-    return false;
-  }
-}
-
-// Deploy initial main.json (only for new projects)
-async function deployInitialMainJson(mainProject) {
-  console.log('Deploying initial main.json...\n');
-  
-  // Create temp directory
-  const tempDir = path.join(PROJECT_ROOT, 'temp-deploy');
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  
-  // Create empty main.json
-  const mainJson = {
-    fs_root: {
-      type: 'folder',
-      createdAt: new Date().toISOString(),
-      modifiedAt: new Date().toISOString(),
-      children: {}
-    }
-  };
-  
-  const mainJsonPath = path.join(tempDir, 'main.json');
-  fs.writeFileSync(mainJsonPath, JSON.stringify(mainJson, null, 2), 'utf8');
-  
-  try {
-    // Deploy using wrangler
-    await runCommand('wrangler', ['pages', 'deploy', tempDir, '--project-name', mainProject, '--branch', 'main']);
-    console.log('\n✓ main.json deployed successfully!\n');
-  } catch (error) {
-    console.log(`\n! Could not deploy main.json: ${error.message}\n`);
-  } finally {
-    // Cleanup
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (e) {}
-  }
-}
+// ========================================
+// 主流程
+// ========================================
 
 async function main() {
   console.log('\n========================================');
-  console.log('  Cloudfiles Setup v1.0.0');
+  console.log('  Cloudfiles Setup v2.0.0');
+  console.log('  (纯 API 模式，无需 Wrangler)');
   console.log('========================================\n');
 
-  // Step 1: Login
-  console.log('[Step 1/4] Checking login status...\n');
+  // Step 1: 获取 API Token
+  console.log('[Step 1/4] 配置 Cloudflare API Token\n');
+  console.log('请先创建一个 Cloudflare API Token:');
+  console.log('  1. 打开 https://dash.cloudflare.com/profile/api-tokens');
+  console.log('  2. 点击 "创建令牌" → 使用 "自定义令牌" 模板');
+  console.log('  3. 权限设置: 账户 → Cloudflare Pages → 编辑');
+  console.log('  4. 复制生成的 Token\n');
+
+  const apiToken = await question('请输入你的 Cloudflare API Token: ');
   
-  const isLoggedIn = await checkLogin();
-  
-  if (isLoggedIn) {
-    console.log('✓ Already logged in!\n');
-    const result = await runCommandCapture('wrangler', ['whoami']);
-    if (result.stdout) {
-      console.log(result.stdout);
-    }
-  } else {
-    console.log('Not logged in. Starting login flow...\n');
-    await runCommand('wrangler', ['login']);
-    console.log('\n✓ Login successful!\n');
+  if (!apiToken || apiToken.trim() === '') {
+    console.log('\n✗ API Token 是必填项！');
+    rl.close();
+    process.exit(1);
   }
 
-  // Step 2: Get project list
-  console.log('\n[Step 2/4] Fetching existing projects...\n');
-  
-  const existingProjects = await getExistingProjects();
+  const token = apiToken.trim();
+
+  // Step 2: 验证 Token 并获取账号
+  console.log('\n[Step 2/4] 验证 API Token...\n');
+
+  try {
+    const tokenInfo = await verifyToken(token);
+    console.log(`✓ Token 有效 (状态: ${tokenInfo.status})`);
+  } catch (error) {
+    console.log(`\n✗ Token 验证失败: ${error.message}`);
+    console.log('请检查 Token 是否正确，以及是否拥有 Pages 编辑权限。');
+    rl.close();
+    process.exit(1);
+  }
+
+  const accountId = await getAccountId(token);
+  console.log(`✓ 账号 ID: ${accountId}\n`);
+
+  // Step 3: 获取项目列表并配置
+  console.log('[Step 3/4] 配置项目\n');
+
+  const existingProjects = await listProjects(token, accountId);
   
   if (existingProjects.length > 0) {
-    console.log(`Found ${existingProjects.length} existing projects:`);
+    console.log(`发现 ${existingProjects.length} 个现有 Pages 项目:`);
     existingProjects.forEach(p => console.log(`  - ${p}`));
     console.log('');
   } else {
-    console.log('No existing projects found.\n');
+    console.log('未发现现有 Pages 项目。\n');
   }
 
-  // Step 3: Get project name
-  console.log('[Step 3/4] Configure project\n');
-  
-  const projectName = await question('Enter your project name (e.g., my-cloudfiles): ');
+  const projectName = await question('请输入项目名称 (e.g., my-cloudfiles): ');
   
   if (!projectName || projectName.trim() === '') {
-    console.log('\n✗ Project name is required!');
+    console.log('\n✗ 项目名称是必填项！');
     rl.close();
     process.exit(1);
   }
@@ -335,126 +315,125 @@ async function main() {
   const mainProject = projectName.trim();
   const dataProject = `${mainProject}-data`;
 
-  // Check if projects already exist
   const mainExists = existingProjects.includes(mainProject);
   const dataExists = existingProjects.includes(dataProject);
   const isNewProject = !mainExists;
 
-  console.log(`\nProject configuration:`);
-  console.log(`  Main project: ${mainProject} ${mainExists ? '(EXISTS)' : '(NEW)'}`);
-  console.log(`  Data project: ${dataProject} ${dataExists ? '(EXISTS)' : '(NEW)'}`);
+  console.log(`\n项目配置:`);
+  console.log(`  API Token: ${token.substring(0, 12)}...`);
+  console.log(`  账号 ID: ${accountId}`);
+  console.log(`  主项目: ${mainProject} ${mainExists ? '(已存在)' : '(新建)'}`);
+  console.log(`  数据项目: ${dataProject} ${dataExists ? '(已存在)' : '(新建)'}`);
   
   if (isNewProject) {
-    console.log('\n  ℹ️  New project detected. Will create projects and deploy initial files.');
+    console.log('\n  ℹ️  新项目，将创建项目并部署初始文件。');
   } else {
-    console.log('\n  ℹ️  Existing project detected. Will only update local config (no data loss).');
+    console.log('\n  ℹ️  已有项目，只更新本地配置（不覆盖数据）。');
   }
   console.log('');
 
-  const confirm = await question('Continue? (Y/N): ');
+  const confirm = await question('确认继续? (Y/N): ');
   if (confirm.toUpperCase() !== 'Y') {
-    console.log('\nCancelled.');
+    console.log('\n已取消。');
     rl.close();
     process.exit(0);
   }
 
-  // Step 4: Create projects if needed (only for new projects)
-  console.log('\n[Step 4/4] Setting up...\n');
+  // Step 4: 创建项目并部署
+  console.log('\n[Step 4/4] 设置项目...\n');
 
   if (isNewProject) {
-    // Create main project
-    console.log(`Creating main project "${mainProject}"...`);
     try {
-      await runCommand('wrangler', ['pages', 'project', 'create', mainProject, '--production-branch=main']);
-      console.log(`\n✓ Main project "${mainProject}" created!\n`);
+      await createProject(token, accountId, mainProject);
+      console.log(`✓ 主项目 "${mainProject}" 创建成功\n`);
     } catch (error) {
-      const errorMsg = error.message || '';
-      if (errorMsg.includes('already exists')) {
-        console.log(`\n✓ Main project "${mainProject}" already exists.\n`);
+      if (error.message.includes('already exists')) {
+        console.log(`✓ 主项目 "${mainProject}" 已存在\n`);
       } else {
-        console.log(`\n! Could not create main project: ${errorMsg}\n`);
+        console.log(`! 创建主项目失败: ${error.message}\n`);
       }
     }
 
-    // Create data project
-    console.log(`Creating data project "${dataProject}"...`);
     try {
-      await runCommand('wrangler', ['pages', 'project', 'create', dataProject, '--production-branch=main']);
-      console.log(`\n✓ Data project "${dataProject}" created!\n`);
+      await createProject(token, accountId, dataProject);
+      console.log(`✓ 数据项目 "${dataProject}" 创建成功\n`);
     } catch (error) {
-      const errorMsg = error.message || '';
-      if (errorMsg.includes('already exists')) {
-        console.log(`\n✓ Data project "${dataProject}" already exists.\n`);
+      if (error.message.includes('already exists')) {
+        console.log(`✓ 数据项目 "${dataProject}" 已存在\n`);
       } else {
-        console.log(`\n! Could not create data project: ${errorMsg}\n`);
+        console.log(`! 创建数据项目失败: ${error.message}\n`);
       }
     }
   } else {
-    console.log(`✓ Using existing main project "${mainProject}"`);
-    console.log(`✓ Using existing data project "${dataProject}"\n`);
+    console.log(`✓ 使用现有主项目 "${mainProject}"`);
+    console.log(`✓ 使用现有数据项目 "${dataProject}"\n`);
   }
 
-  // Get production URL
-  console.log('Getting production URL...\n');
-  const mainUrl = await getProjectUrlFromDeployment(mainProject);
-  
-  console.log(`\n✓ Production URL: ${mainUrl}\n`);
-  
-  // Update config.js
-  try {
-    const libPath = path.join(PROJECT_ROOT, 'lib');
-    if (!fs.existsSync(libPath)) {
-      fs.mkdirSync(libPath, { recursive: true });
-    }
-    
-    updateConfig(mainProject, dataProject, mainUrl);
-    console.log('');
-  } catch (error) {
-    console.log(`✗ Failed to update config.js: ${error.message}\n`);
-  }
+  // 获取生产 URL
+  const mainUrl = await getProjectUrl(token, accountId, mainProject);
+  console.log(`✓ 生产 URL: ${mainUrl}\n`);
 
-  // Only deploy main.json for NEW projects
+  // 更新 config.js
+  updateConfig(token, accountId, mainProject, dataProject, mainUrl);
+
+  // 部署初始 main.json（仅新项目）
   if (isNewProject) {
-    console.log('Deploying initial main.json for new project...\n');
-    await deployInitialMainJson(mainProject);
+    console.log('部署初始 main.json...');
+    const mainJson = JSON.stringify({
+      fs_root: {
+        type: 'folder',
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString(),
+        children: {}
+      }
+    }, null, 2);
+    await deployMainJsonViaApi(token, accountId, mainProject, mainJson);
   } else {
-    // Check if main.json exists for existing project
     const mainJsonExists = await checkMainJsonExists(mainUrl);
-    
     if (!mainJsonExists) {
-      console.log('⚠️  main.json not found on existing project, deploying...\n');
-      await deployInitialMainJson(mainProject);
+      console.log('⚠️  main.json 不存在，正在部署...');
+      const mainJson = JSON.stringify({
+        fs_root: {
+          type: 'folder',
+          createdAt: new Date().toISOString(),
+          modifiedAt: new Date().toISOString(),
+          children: {}
+        }
+      }, null, 2);
+      await deployMainJsonViaApi(token, accountId, mainProject, mainJson);
     } else {
-      console.log('✓ main.json already exists, skipping deployment.\n');
-      console.log('  Your existing files are safe!\n');
+      console.log('✓ main.json 已存在，跳过部署。');
+      console.log('  你的现有文件是安全的！\n');
     }
   }
 
   // Done
-  console.log('========================================');
-  console.log('  Setup Complete!');
+  console.log('\n========================================');
+  console.log('  设置完成！');
   console.log('========================================\n');
-  console.log('Your configuration:');
-  console.log(`  MAIN_PROJECT_NAME = '${mainProject}'`);
-  console.log(`  DATA_PROJECT_NAME = '${dataProject}'`);
-  console.log(`  MAIN_PROJECT_URL = '${mainUrl}'`);
+  console.log('配置概览:');
+  console.log(`  API Token: ${token.substring(0, 12)}...`);
+  console.log(`  账号 ID: ${accountId}`);
+  console.log(`  主项目: ${mainProject}`);
+  console.log(`  数据项目: ${dataProject}`);
+  console.log(`  URL: ${mainUrl}`);
   
   if (isNewProject) {
-    console.log('\n✨ New project created successfully!');
+    console.log('\n✨ 新项目创建成功！');
   } else {
-    console.log('\n✨ Configuration updated! Your existing files are preserved.');
+    console.log('\n✨ 配置更新成功！现有文件已保留。');
   }
   
-  console.log('\nNext steps:');
-  console.log('  1. Run: start.bat');
-  console.log('  2. Open: http://localhost:8000');
-  console.log('  3. Or use CLI: node main.js up ./file.pdf /\n');
+  console.log('\n下一步:');
+  console.log('  1. 运行: start.bat');
+  console.log('  2. 打开: http://localhost:8000');
+  console.log('  3. 或使用 CLI: node main.js up ./file.pdf /\n');
 
   rl.close();
 }
 
 main().catch((error) => {
-  console.error('\nError:', error.message);
+  console.error('\n错误:', error.message);
   rl.close();
   process.exit(1);
 });
