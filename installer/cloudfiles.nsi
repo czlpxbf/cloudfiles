@@ -49,7 +49,7 @@ Section "Install" SecInstall
   SetOutPath $INSTDIR
 
   ; 复制所有文件
-  File /r "dist\cloudfiles\*.*"
+  File /r "dist\cloudfiles\"
 
   ; 创建开始菜单快捷方式
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
