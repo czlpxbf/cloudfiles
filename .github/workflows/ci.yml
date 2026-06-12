@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check syntax (server.js)
+        run: node --check server.js
+
+      - name: Check syntax (setup.js)
+        run: node --check setup.js
+
+      - name: Check syntax (lib/api.js)
+        run: node --check lib/api.js
+
+      - name: Check syntax (lib/utils.js)
+        run: node --check lib/utils.js
+
+      - name: Check syntax (lib/upload.js)
+        run: node --check lib/upload.js
+
+      - name: Check syntax (lib/state.js)
+        run: node --check lib/state.js
+
+      - name: Check syntax (lib/operations.js)
+        run: node --check lib/operations.js
