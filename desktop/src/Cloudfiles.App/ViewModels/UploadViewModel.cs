@@ -1,5 +1,6 @@
 using System.IO;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cloudfiles.Core.Api;
@@ -32,7 +33,7 @@ public partial class UploadViewModel : ObservableObject
 
     public UploadViewModel()
     {
-        var httpClient = new HttpClient();
+        var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         _apiClient = new CloudflareApiClient(httpClient);
         _configService = new ConfigService();
         _uploadService = new UploadService(_apiClient, new FileChunker());
@@ -87,14 +88,15 @@ public partial class UploadViewModel : ObservableObject
     {
         if (UploadItems.Count == 0)
         {
-            StatusMessage = "No files selected";
+            StatusMessage = "请先选择要上传的文件";
             return;
         }
 
         if (string.IsNullOrEmpty(_configService.Config.AccountId) ||
-            string.IsNullOrEmpty(_configService.Config.SelectedProject))
+            string.IsNullOrEmpty(_configService.Config.SelectedProject) ||
+            string.IsNullOrEmpty(_configService.Config.DataProjectName))
         {
-            StatusMessage = "Please configure account ID and project in Settings";
+            StatusMessage = "请先在设置中配置账户 ID、主项目和数据项目";
             return;
         }
 
@@ -102,38 +104,188 @@ public partial class UploadViewModel : ObservableObject
         {
             IsUploading = true;
             UploadProgress = 0;
-            StatusMessage = "Uploading...";
+            StatusMessage = "正在分块...";
 
-            var files = new List<(string remotePath, byte[] bytes, string contentType)>();
+            // Step 1: Chunk all files and collect chunks
+            var chunker = new FileChunker();
+            var fileChunkInfos = new List<(UploadItem item, byte[] fileBytes, List<FileChunk> chunks, List<string> chunkUrls)>();
 
+            long totalBytes = 0;
             foreach (var item in UploadItems)
             {
                 var fileBytes = await File.ReadAllBytesAsync(item.LocalPath);
-                files.Add((item.RemotePath, fileBytes, item.ContentType));
+                var chunks = chunker.ChunkFile(fileBytes, item.ContentType);
+                fileChunkInfos.Add((item, fileBytes, chunks, new List<string>()));
+                totalBytes += fileBytes.Length;
             }
 
-            _uploadService.ProgressChanged += (s, e) =>
+            // Step 2: Upload all chunks to data project in one batch
+            StatusMessage = "正在上传分块到数据项目...";
+            var allChunks = new List<(string remotePath, byte[] bytes, string contentType)>();
+            foreach (var (_, _, chunks, _) in fileChunkInfos)
             {
-                UploadProgress = e.Progress * 100;
-                StatusMessage = $"Uploading... {UploadProgress:F0}%";
-            };
+                foreach (var chunk in chunks)
+                {
+                    allChunks.Add((chunk.RemotePath, chunk.Bytes, chunk.ContentType));
+                }
+            }
 
-            var urls = await _uploadService.UploadFilesAsync(
+            var dataProject = await _apiClient.GetProjectAsync(_configService.Config.AccountId, _configService.Config.DataProjectName);
+            var dataProjectSubdomain = dataProject.Subdomain;
+
+            var chunkUrls = await _apiClient.DeployFilesAsync(
                 _configService.Config.AccountId,
-                _configService.Config.SelectedProject,
-                files);
+                _configService.Config.DataProjectName,
+                allChunks);
 
-            StatusMessage = $"Upload complete! {urls.Count} file(s) deployed";
+            // Build chunk URL mapping: https://{subdomain}.pages.dev/chunk-{index}
+            var chunkUrlIndex = 0;
+            foreach (var info in fileChunkInfos)
+            {
+                for (var i = 0; i < info.chunks.Count; i++)
+                {
+                    info.chunkUrls.Add($"https://{dataProjectSubdomain}.pages.dev/{info.chunks[i].RemotePath}");
+                }
+            }
+
+            UploadProgress = 50;
+            StatusMessage = "正在更新文件索引...";
+
+            // Step 3: Download current main.json from main project
+            var mainProject = await _apiClient.GetProjectAsync(_configService.Config.AccountId, _configService.Config.SelectedProject);
+            var mainProjectUrl = _configService.GetProjectUrl(mainProject);
+
+            JsonElement index;
+            try
+            {
+                index = await _apiClient.GetFileIndexAsync(mainProjectUrl);
+            }
+            catch
+            {
+                // Create default index if not exists
+                var defaultIndex = new
+                {
+                    fs_root = new
+                    {
+                        type = "folder",
+                        createdAt = DateTime.UtcNow.ToString("o"),
+                        modifiedAt = DateTime.UtcNow.ToString("o"),
+                        children = new { }
+                    }
+                };
+                index = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(defaultIndex));
+            }
+
+            // Step 4: Add file version nodes to main.json
+            var indexDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(index.GetRawText())!;
+            var fsRoot = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(indexDict["fs_root"].GetRawText())!;
+            var now = DateTime.UtcNow.ToString("o");
+
+            foreach (var info in fileChunkInfos)
+            {
+                var remotePath = info.item.RemotePath.Trim('/');
+                var parts = remotePath.Split('/');
+                var leafName = parts[^1];
+                var parentParts = parts[..^1];
+
+                // Navigate to parent directory
+                var currentChildren = fsRoot;
+                foreach (var part in parentParts)
+                {
+                    if (!currentChildren.TryGetValue(part, out var childNode))
+                    {
+                        StatusMessage = $"上传失败: 父目录 /{string.Join("/", parentParts)} 不存在";
+                        return;
+                    }
+                    var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+                    if (!folderDict.TryGetValue("children", out var nextChildren))
+                    {
+                        StatusMessage = $"上传失败: /{part} 不是文件夹";
+                        return;
+                    }
+                    currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+                }
+
+                // Create file version node
+                var fileVersion = new
+                {
+                    type = "file",
+                    size = info.fileBytes.Length,
+                    chunks = info.chunkUrls,
+                    createdAt = now,
+                    modifiedAt = now
+                };
+                var fileVersionJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fileVersion));
+
+                if (!currentChildren.ContainsKey(leafName))
+                {
+                    // New file: create array with one version
+                    currentChildren[leafName] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new[] { fileVersion }));
+                }
+                else
+                {
+                    var existing = currentChildren[leafName];
+                    if (existing.ValueKind == JsonValueKind.Array)
+                    {
+                        // Existing file: append new version
+                        var versions = existing.EnumerateArray().ToList();
+                        versions.Add(fileVersionJson);
+                        currentChildren[leafName] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(versions));
+                    }
+                    else
+                    {
+                        StatusMessage = $"上传失败: {leafName} 已存在且为文件夹";
+                        return;
+                    }
+                }
+
+                // Update parent timestamps
+                UpdateParentTimestamps(fsRoot, parts, now);
+            }
+
+            // Step 5: Redeploy main.json
+            fsRoot["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+            indexDict["fs_root"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fsRoot));
+            var updatedJson = JsonSerializer.Serialize(indexDict, new JsonSerializerOptions { WriteIndented = true });
+
+            StatusMessage = "正在部署文件索引...";
+            await _apiClient.DeployMainJsonAsync(_configService.Config.AccountId, _configService.Config.SelectedProject, updatedJson);
+
+            UploadProgress = 100;
+            StatusMessage = $"上传完成! {fileChunkInfos.Count} 个文件已部署";
             UploadItems.Clear();
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Upload failed: {ex.Message}";
+            StatusMessage = $"上传失败: {ex.Message}";
         }
         finally
         {
             IsUploading = false;
             UploadProgress = 0;
+        }
+    }
+
+    private static void UpdateParentTimestamps(Dictionary<string, JsonElement> rootChildren, string[] parts, string now)
+    {
+        var currentChildren = rootChildren;
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            var part = parts[i];
+            if (!currentChildren.TryGetValue(part, out var childNode)) break;
+
+            var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+            folderDict["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+            currentChildren[part] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(folderDict));
+
+            if (folderDict.TryGetValue("children", out var nextChildren))
+            {
+                currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+            }
+            else
+            {
+                break;
+            }
         }
     }
 

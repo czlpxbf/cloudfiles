@@ -1,51 +1,64 @@
 using Cloudfiles.Core.Api;
-using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.Core.Services;
 
 public class DownloadService
 {
-    private readonly HttpClient _httpClient;
+    private readonly CloudflareApiClient _apiClient;
+    private readonly SemaphoreSlim _semaphore = new(4); // Max 4 concurrent downloads
 
-    public DownloadService(HttpClient httpClient)
+    public DownloadService(CloudflareApiClient apiClient)
     {
-        _httpClient = httpClient;
+        _apiClient = apiClient;
     }
 
     public event EventHandler<DownloadProgressEventArgs>? ProgressChanged;
 
-    public async Task<byte[]> DownloadFileAsync(string url)
+    public async Task<byte[]> DownloadAndMergeChunksAsync(List<string> chunkUrls)
     {
-        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
+        var totalChunks = chunkUrls.Count;
+        var chunks = new byte[totalChunks][];
+        var completedChunks = 0;
 
-        var totalBytes = response.Content.Headers.ContentLength ?? 0;
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var memoryStream = new MemoryStream();
-
-        var buffer = new byte[8192];
-        int bytesRead;
-        long totalRead = 0;
-
-        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        var tasks = chunkUrls.Select(async (url, index) =>
         {
-            await memoryStream.WriteAsync(buffer, 0, bytesRead);
-            totalRead += bytesRead;
-
-            ProgressChanged?.Invoke(this, new DownloadProgressEventArgs
+            await _semaphore.WaitAsync();
+            try
             {
-                BytesDownloaded = totalRead,
-                TotalBytes = totalBytes,
-                Url = url
-            });
+                chunks[index] = await _apiClient.DownloadChunkAsync(url);
+                Interlocked.Increment(ref completedChunks);
+
+                ProgressChanged?.Invoke(this, new DownloadProgressEventArgs
+                {
+                    CompletedChunks = completedChunks,
+                    TotalChunks = totalChunks,
+                    Progress = (double)completedChunks / totalChunks * 100
+                });
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        // Merge all chunks
+        var totalSize = chunks.Sum(c => c.Length);
+        var result = new byte[totalSize];
+        var offset = 0;
+        foreach (var chunk in chunks)
+        {
+            Buffer.BlockCopy(chunk, 0, result, offset, chunk.Length);
+            offset += chunk.Length;
         }
 
-        return memoryStream.ToArray();
+        return result;
     }
 
-    public async Task DownloadFileToDiskAsync(string url, string localPath)
+    public async Task DownloadToFileAsync(List<string> chunkUrls, string localPath)
     {
-        var fileBytes = await DownloadFileAsync(url);
+        var data = await DownloadAndMergeChunksAsync(chunkUrls);
 
         var directory = Path.GetDirectoryName(localPath);
         if (!string.IsNullOrEmpty(directory))
@@ -53,14 +66,13 @@ public class DownloadService
             Directory.CreateDirectory(directory);
         }
 
-        await File.WriteAllBytesAsync(localPath, fileBytes);
+        await File.WriteAllBytesAsync(localPath, data);
     }
 }
 
 public class DownloadProgressEventArgs : EventArgs
 {
-    public long BytesDownloaded { get; set; }
-    public long TotalBytes { get; set; }
-    public string Url { get; set; } = "";
-    public double Progress => TotalBytes > 0 ? (double)BytesDownloaded / TotalBytes : 0;
+    public int CompletedChunks { get; set; }
+    public int TotalChunks { get; set; }
+    public double Progress { get; set; }
 }

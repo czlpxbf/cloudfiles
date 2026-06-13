@@ -171,6 +171,41 @@ public class CloudflareApiClient
         throw new NotImplementedException("Individual file deletion is not supported by Cloudflare Pages. Redeploy without the file instead.");
     }
 
+    public async Task<PagesProject> GetProjectAsync(string accountId, string projectName)
+    {
+        var request = CreateRequest(HttpMethod.Get,
+            $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects/{projectName}");
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<CloudflareResponse<PagesProject>>(json, JsonOptions);
+        return result?.Result ?? throw new InvalidOperationException("Failed to get project");
+    }
+
+    public async Task<JsonElement> GetFileIndexAsync(string projectUrl)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, $"{projectUrl}/main.json");
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<JsonElement>(json);
+    }
+
+    public async Task DeployMainJsonAsync(string accountId, string projectName, string jsonContent)
+    {
+        var bytes = Encoding.UTF8.GetBytes(jsonContent);
+        await DeployFileAsync(accountId, projectName, "main.json", bytes, "application/json");
+    }
+
+    public async Task<byte[]> DownloadChunkAsync(string url)
+    {
+        var response = await _httpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync();
+    }
+
     private HttpRequestMessage CreateRequest(HttpMethod method, string url)
     {
         var request = new HttpRequestMessage(method, url);

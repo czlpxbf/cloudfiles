@@ -1,5 +1,4 @@
 using Cloudfiles.Core.Api;
-using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.Core.Services;
 
@@ -16,47 +15,65 @@ public class UploadService
 
     public event EventHandler<UploadProgressEventArgs>? ProgressChanged;
 
-    public async Task<List<string>> UploadFileAsync(string accountId, string projectName, string remotePath, byte[] fileBytes, string contentType)
+    /// <summary>
+    /// Upload files to the data project. Returns chunk URLs per file.
+    /// </summary>
+    public async Task<List<List<string>>> UploadFilesAsync(
+        string accountId, string projectName, string dataProjectSubdomain,
+        List<(string localPath, string remotePath)> files)
     {
-        var chunks = _chunker.ChunkFile(remotePath, fileBytes, contentType);
-
-        if (chunks.Count == 1)
-        {
-            var url = await _apiClient.DeployFileAsync(accountId, projectName, remotePath, fileBytes, contentType);
-            ProgressChanged?.Invoke(this, new UploadProgressEventArgs { BytesUploaded = fileBytes.Length, TotalBytes = fileBytes.Length, FileName = remotePath });
-            return new List<string> { url };
-        }
-
-        // For multi-chunk files, deploy all chunks together
-        var fileList = chunks.Select(c => (c.RemotePath, c.Bytes, c.ContentType)).ToList();
-        var urls = await _apiClient.DeployFilesAsync(accountId, projectName, fileList);
-
-        var totalBytes = fileBytes.Length;
-        ProgressChanged?.Invoke(this, new UploadProgressEventArgs { BytesUploaded = totalBytes, TotalBytes = totalBytes, FileName = remotePath });
-
-        return urls;
-    }
-
-    public async Task<List<string>> UploadFilesAsync(string accountId, string projectName, List<(string remotePath, byte[] bytes, string contentType)> files)
-    {
-        var allFiles = new List<(string remotePath, byte[] bytes, string contentType)>();
+        var allChunks = new List<(string remotePath, byte[] bytes, string contentType)>();
+        var fileChunkCounts = new List<int>();
         long totalBytes = 0;
 
-        foreach (var file in files)
+        foreach (var (localPath, _) in files)
         {
-            var chunks = _chunker.ChunkFile(file.remotePath, file.bytes, file.contentType);
+            var fileBytes = await File.ReadAllBytesAsync(localPath);
+            var contentType = GetContentType(Path.GetExtension(localPath));
+            var chunks = _chunker.ChunkFile(fileBytes, contentType);
+            fileChunkCounts.Add(chunks.Count);
+
             foreach (var chunk in chunks)
             {
-                allFiles.Add((chunk.RemotePath, chunk.Bytes, chunk.ContentType));
+                allChunks.Add((chunk.RemotePath, chunk.Bytes, chunk.ContentType));
             }
-            totalBytes += file.bytes.Length;
+            totalBytes += fileBytes.Length;
         }
 
-        var urls = await _apiClient.DeployFilesAsync(accountId, projectName, allFiles);
+        // Upload all chunks in one batch
+        await _apiClient.DeployFilesAsync(accountId, projectName, allChunks);
 
-        ProgressChanged?.Invoke(this, new UploadProgressEventArgs { BytesUploaded = totalBytes, TotalBytes = totalBytes, FileName = $"{files.Count} files" });
+        // Build chunk URLs per file
+        var result = new List<List<string>>();
+        var chunkIndex = 0;
+        for (var i = 0; i < files.Count; i++)
+        {
+            var urls = new List<string>();
+            for (var j = 0; j < fileChunkCounts[i]; j++)
+            {
+                urls.Add($"https://{dataProjectSubdomain}.pages.dev/{allChunks[chunkIndex].remotePath}");
+                chunkIndex++;
+            }
+            result.Add(urls);
+        }
 
-        return urls;
+        ProgressChanged?.Invoke(this, new UploadProgressEventArgs { BytesUploaded = totalBytes, TotalBytes = totalBytes });
+
+        return result;
+    }
+
+    private static string GetContentType(string extension)
+    {
+        return extension.ToLowerInvariant() switch
+        {
+            ".html" or ".htm" => "text/html",
+            ".css" => "text/css",
+            ".js" => "application/javascript",
+            ".json" => "application/json",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            _ => "application/octet-stream"
+        };
     }
 }
 
@@ -64,6 +81,5 @@ public class UploadProgressEventArgs : EventArgs
 {
     public long BytesUploaded { get; set; }
     public long TotalBytes { get; set; }
-    public string FileName { get; set; } = "";
     public double Progress => TotalBytes > 0 ? (double)BytesUploaded / TotalBytes : 0;
 }
