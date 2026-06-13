@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Net.Http;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,7 +21,7 @@ public partial class SettingsViewModel : ObservableObject
     private string _accountId = "";
 
     [ObservableProperty]
-    private string _selectedProject = "";
+    private PagesProject? _selectedProject;
 
     [ObservableProperty]
     private ObservableCollection<PagesProject> _projects = new();
@@ -37,6 +38,11 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _chunkSizeMB = 25;
 
+    /// <summary>
+    /// 获取选中的项目名称字符串
+    /// </summary>
+    public string SelectedProjectName => SelectedProject?.Name ?? "";
+
     public SettingsViewModel()
     {
         var httpClient = new HttpClient();
@@ -50,12 +56,27 @@ public partial class SettingsViewModel : ObservableObject
         await _configService.LoadAsync();
         ApiToken = _configService.Config.ApiToken;
         AccountId = _configService.Config.AccountId;
-        SelectedProject = _configService.Config.SelectedProject;
         ChunkSizeMB = _configService.Config.ChunkSizeMB;
 
         if (!string.IsNullOrEmpty(ApiToken))
         {
             _apiClient.SetApiToken(ApiToken);
+        }
+
+        // 加载项目列表并恢复选中项
+        if (!string.IsNullOrEmpty(AccountId) && !string.IsNullOrEmpty(ApiToken))
+        {
+            try
+            {
+                var projects = await _apiClient.ListProjectsAsync(AccountId);
+                Projects = new ObservableCollection<PagesProject>(projects);
+                var saved = _configService.Config.SelectedProject;
+                if (!string.IsNullOrEmpty(saved))
+                {
+                    SelectedProject = Projects.FirstOrDefault(p => p.Name == saved);
+                }
+            }
+            catch { }
         }
     }
 
@@ -116,7 +137,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         _configService.Config.ApiToken = ApiToken;
         _configService.Config.AccountId = AccountId;
-        _configService.Config.SelectedProject = SelectedProject;
+        _configService.Config.SelectedProject = SelectedProjectName;
         _configService.Config.ChunkSizeMB = ChunkSizeMB;
         await _configService.SaveAsync();
         VerificationMessage = "设置已保存";

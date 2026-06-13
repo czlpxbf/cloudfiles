@@ -37,7 +37,7 @@ public class ConfigService
 
     public string GetProjectUrl(string projectName)
     {
-        if (!string.IsNullOrEmpty(Config.AccountId) && !string.IsNullOrEmpty(projectName))
+        if (!string.IsNullOrEmpty(projectName))
         {
             return $"https://{projectName}.pages.dev";
         }
