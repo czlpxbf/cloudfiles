@@ -9,7 +9,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _ = AppContext.Instance.InitializeAsync();
+        _ = Core.Services.AppContext.Instance.InitializeAsync();
         DataContext = new MainViewModel();
     }
 }

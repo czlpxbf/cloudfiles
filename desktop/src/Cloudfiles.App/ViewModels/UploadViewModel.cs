@@ -1,5 +1,6 @@
 using System.IO;
 using System.Collections.ObjectModel;
+using System.Net.Http;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -33,8 +34,8 @@ public partial class UploadViewModel : ObservableObject
 
     public UploadViewModel()
     {
-        _apiClient = AppContext.Instance.ApiClient;
-        _configService = AppContext.Instance.ConfigService;
+        _apiClient = Core.Services.AppContext.Instance.ApiClient;
+        _configService = Core.Services.AppContext.Instance.ConfigService;
         _uploadService = new UploadService(_apiClient, new FileChunker());
         _ = InitializeAsync();
     }

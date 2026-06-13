@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -42,8 +43,8 @@ public partial class FileListViewModel : ObservableObject
 
     public FileListViewModel()
     {
-        _apiClient = AppContext.Instance.ApiClient;
-        _configService = AppContext.Instance.ConfigService;
+        _apiClient = Core.Services.AppContext.Instance.ApiClient;
+        _configService = Core.Services.AppContext.Instance.ConfigService;
         _downloadService = new DownloadService(_apiClient);
         _ = InitializeAsync();
     }

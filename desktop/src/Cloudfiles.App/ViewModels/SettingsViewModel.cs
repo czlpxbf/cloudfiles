@@ -46,8 +46,8 @@ public partial class SettingsViewModel : ObservableObject
 
     public SettingsViewModel()
     {
-        _apiClient = AppContext.Instance.ApiClient;
-        _configService = AppContext.Instance.ConfigService;
+        _apiClient = Core.Services.AppContext.Instance.ApiClient;
+        _configService = Core.Services.AppContext.Instance.ConfigService;
         _ = InitializeAsync();
     }
 
