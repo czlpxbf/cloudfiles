@@ -1,6 +1,5 @@
 using System.IO;
 using System.Collections.ObjectModel;
-using System.Net.Http;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -34,9 +33,8 @@ public partial class UploadViewModel : ObservableObject
 
     public UploadViewModel()
     {
-        var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        _apiClient = new CloudflareApiClient(httpClient);
-        _configService = new ConfigService();
+        _apiClient = AppContext.Instance.ApiClient;
+        _configService = AppContext.Instance.ConfigService;
         _uploadService = new UploadService(_apiClient, new FileChunker());
         _ = InitializeAsync();
     }
@@ -44,10 +42,6 @@ public partial class UploadViewModel : ObservableObject
     private async Task InitializeAsync()
     {
         await _configService.LoadAsync();
-        if (!string.IsNullOrEmpty(_configService.Config.ApiToken))
-        {
-            _apiClient.SetApiToken(_configService.Config.ApiToken);
-        }
     }
 
     [RelayCommand]

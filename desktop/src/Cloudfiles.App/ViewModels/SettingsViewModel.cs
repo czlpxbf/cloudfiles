@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Net.Http;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cloudfiles.Core.Api;
@@ -47,9 +46,8 @@ public partial class SettingsViewModel : ObservableObject
 
     public SettingsViewModel()
     {
-        var httpClient = new HttpClient();
-        _apiClient = new CloudflareApiClient(httpClient);
-        _configService = new ConfigService();
+        _apiClient = AppContext.Instance.ApiClient;
+        _configService = AppContext.Instance.ConfigService;
         _ = InitializeAsync();
     }
 
@@ -60,21 +58,13 @@ public partial class SettingsViewModel : ObservableObject
         AccountId = _configService.Config.AccountId;
         ChunkSizeMB = _configService.Config.ChunkSizeMB;
 
-        if (!string.IsNullOrEmpty(ApiToken))
-        {
-            _apiClient.SetApiToken(ApiToken);
-        }
-
-        // Load projects first, then set selected items by name
         if (!string.IsNullOrEmpty(AccountId) && !string.IsNullOrEmpty(ApiToken))
         {
             try
             {
-                _apiClient.SetApiToken(ApiToken);
                 var projects = await _apiClient.ListProjectsAsync(AccountId);
                 Projects = new ObservableCollection<PagesProject>(projects);
 
-                // Match saved project names to PagesProject objects
                 if (!string.IsNullOrEmpty(_configService.Config.SelectedProject))
                 {
                     SelectedProject = Projects.FirstOrDefault(p => p.Name == _configService.Config.SelectedProject);

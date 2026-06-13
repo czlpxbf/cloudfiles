@@ -1,7 +1,8 @@
 <UserControl x:Class="Cloudfiles.App.Views.SettingsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="#1e1e2e">
+             Background="#1e1e2e"
+             Loaded="SettingsView_Loaded">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <Grid Margin="24">
             <Grid.RowDefinitions>

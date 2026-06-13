@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -43,9 +42,8 @@ public partial class FileListViewModel : ObservableObject
 
     public FileListViewModel()
     {
-        var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        _apiClient = new CloudflareApiClient(httpClient);
-        _configService = new ConfigService();
+        _apiClient = AppContext.Instance.ApiClient;
+        _configService = AppContext.Instance.ConfigService;
         _downloadService = new DownloadService(_apiClient);
         _ = InitializeAsync();
     }
@@ -55,7 +53,6 @@ public partial class FileListViewModel : ObservableObject
         await _configService.LoadAsync();
         if (!string.IsNullOrEmpty(_configService.Config.ApiToken))
         {
-            _apiClient.SetApiToken(_configService.Config.ApiToken);
             await LoadProjectUrlAsync();
             await LoadFileListAsync();
         }

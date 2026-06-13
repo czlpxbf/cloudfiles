@@ -1,0 +1,6 @@
+- [x] PasswordBox 初始化时不会清空 ViewModel 已有的 token
+- [x] PasswordBox 能显示已保存的 token
+- [x] 所有 ViewModel 共享同一个 CloudflareApiClient 实例
+- [x] 在设置页面更新 token 后，其他页面的 API 调用使用新 token
+- [x] 导航时复用 ViewModel 实例，不重新创建
+- [x] 编译通过，0 Error（代码审查确认，需 GitHub Actions 验证）
