@@ -14,10 +14,19 @@ public class CloudflareResponse<T>
     public List<CloudflareError>? Errors { get; set; }
 
     [JsonPropertyName("messages")]
-    public List<string>? Messages { get; set; }
+    public List<CloudflareMessage>? Messages { get; set; }
 }
 
 public class CloudflareError
+{
+    [JsonPropertyName("code")]
+    public int Code { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "";
+}
+
+public class CloudflareMessage
 {
     [JsonPropertyName("code")]
     public int Code { get; set; }
