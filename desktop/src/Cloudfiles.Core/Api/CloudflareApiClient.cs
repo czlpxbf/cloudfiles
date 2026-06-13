@@ -45,7 +45,19 @@ public class CloudflareApiClient
         return result?.Result ?? new List<PagesProject>();
     }
 
-    public async Task<List<FileEntry>> ListFilesAsync(string accountId, string projectName)
+    public async Task<PagesProject> GetProjectAsync(string accountId, string projectName)
+    {
+        var request = CreateRequest(HttpMethod.Get,
+            $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects/{projectName}");
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<CloudflareResponse<PagesProject>>(json, JsonOptions);
+        return result?.Result ?? throw new InvalidOperationException("Failed to get project info");
+    }
+
+    public async Task<List<DeploymentInfo>> ListDeploymentsAsync(string accountId, string projectName)
     {
         var request = CreateRequest(HttpMethod.Get,
             $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects/{projectName}/deployments");
@@ -53,30 +65,8 @@ public class CloudflareApiClient
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<CloudflareResponse<JsonElement>>(json, JsonOptions);
-
-        // Parse deployment files from the latest deployment
-        var files = new List<FileEntry>();
-        if (result?.Result.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var deployment in result.Result.EnumerateArray())
-            {
-                if (deployment.TryGetProperty("files", out var filesElement))
-                {
-                    foreach (var file in filesElement.EnumerateArray())
-                    {
-                        files.Add(new FileEntry
-                        {
-                            Path = file.TryGetProperty("path", out var p) ? p.GetString() ?? "" : "",
-                            Size = file.TryGetProperty("size", out var s) ? s.GetInt64() : 0
-                        });
-                    }
-                }
-                break; // Only latest deployment
-            }
-        }
-
-        return files;
+        var result = JsonSerializer.Deserialize<CloudflareResponse<List<DeploymentInfo>>>(json, JsonOptions);
+        return result?.Result ?? new List<DeploymentInfo>();
     }
 
     public async Task<string> DeployFileAsync(string accountId, string projectName, string remotePath, byte[] fileBytes, string contentType)

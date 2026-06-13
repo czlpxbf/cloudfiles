@@ -16,10 +16,10 @@ public partial class FileListViewModel : ObservableObject
     private readonly ConfigService _configService;
 
     [ObservableProperty]
-    private ObservableCollection<FileEntry> _files = new();
+    private ObservableCollection<DeploymentInfo> _deployments = new();
 
     [ObservableProperty]
-    private FileEntry? _selectedFile;
+    private DeploymentInfo? _selectedDeployment;
 
     [ObservableProperty]
     private bool _isLoading;
@@ -29,6 +29,9 @@ public partial class FileListViewModel : ObservableObject
 
     [ObservableProperty]
     private string _errorMessage = "";
+
+    [ObservableProperty]
+    private string _projectUrl = "";
 
     public FileListViewModel()
     {
@@ -44,22 +47,23 @@ public partial class FileListViewModel : ObservableObject
         if (!string.IsNullOrEmpty(_configService.Config.ApiToken))
         {
             _apiClient.SetApiToken(_configService.Config.ApiToken);
-            await LoadFilesAsync();
+            ProjectUrl = _configService.GetProjectUrl(_configService.Config.SelectedProject);
+            await LoadDeploymentsAsync();
         }
     }
 
     [RelayCommand]
-    private async Task LoadFiles()
+    private async Task Refresh()
     {
-        await LoadFilesAsync();
+        await LoadDeploymentsAsync();
     }
 
-    private async Task LoadFilesAsync()
+    private async Task LoadDeploymentsAsync()
     {
         if (string.IsNullOrEmpty(_configService.Config.AccountId) ||
             string.IsNullOrEmpty(_configService.Config.SelectedProject))
         {
-            ErrorMessage = "Please configure your account ID and project in Settings.";
+            ErrorMessage = "请先在设置中配置账户 ID 和项目名称。";
             return;
         }
 
@@ -67,14 +71,14 @@ public partial class FileListViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = "";
-            var files = await _apiClient.ListFilesAsync(
+            var deployments = await _apiClient.ListDeploymentsAsync(
                 _configService.Config.AccountId,
                 _configService.Config.SelectedProject);
-            Files = new ObservableCollection<FileEntry>(files);
+            Deployments = new ObservableCollection<DeploymentInfo>(deployments);
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Failed to load files: {ex.Message}";
+            ErrorMessage = $"加载部署列表失败: {ex.Message}";
         }
         finally
         {
@@ -83,44 +87,48 @@ public partial class FileListViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task DownloadFile()
-    {
-        if (SelectedFile == null) return;
-
-        try
-        {
-            var downloadService = new DownloadService(new HttpClient());
-            var projectUrl = _configService.GetProjectUrl(_configService.Config.SelectedProject);
-            var fileUrl = $"{projectUrl}{SelectedFile.Path}";
-
-            var dialog = new Microsoft.Win32.SaveFileDialog
-            {
-                FileName = Path.GetFileName(SelectedFile.Path),
-                Title = "Save File"
-            };
-
-            if (dialog.ShowDialog() == true)
-            {
-                await downloadService.DownloadFileToDiskAsync(fileUrl, dialog.FileName);
-            }
-        }
-        catch (Exception ex)
-        {
-            ErrorMessage = $"Download failed: {ex.Message}";
-        }
-    }
-
-    [RelayCommand]
     private void Search()
     {
         if (string.IsNullOrWhiteSpace(SearchText))
         {
-            _ = LoadFilesAsync();
+            _ = LoadDeploymentsAsync();
             return;
         }
 
-        var filtered = Files.Where(f =>
-            f.Path.Contains(SearchText, StringComparison.OrdinalIgnoreCase)).ToList();
-        Files = new ObservableCollection<FileEntry>(filtered);
+        var filtered = Deployments.Where(d =>
+            d.Url.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
+            d.Environment.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
+            (d.CreatedOn ?? "").Contains(SearchText, StringComparison.OrdinalIgnoreCase)).ToList();
+        Deployments = new ObservableCollection<DeploymentInfo>(filtered);
+    }
+
+    [RelayCommand]
+    private void OpenUrl()
+    {
+        if (SelectedDeployment == null) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = SelectedDeployment.Url,
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private void OpenProjectUrl()
+    {
+        if (string.IsNullOrEmpty(ProjectUrl)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = ProjectUrl,
+                UseShellExecute = true
+            });
+        }
+        catch { }
     }
 }

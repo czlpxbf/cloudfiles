@@ -64,26 +64,26 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ApiToken))
         {
-            VerificationMessage = "Please enter an API token";
+            VerificationMessage = "请输入 API Token";
             return;
         }
 
         try
         {
             IsVerifying = true;
-            VerificationMessage = "Verifying...";
+            VerificationMessage = "验证中...";
             _apiClient.SetApiToken(ApiToken);
 
             var tokenInfo = await _apiClient.VerifyTokenAsync();
             IsTokenValid = tokenInfo.Status == "active";
             VerificationMessage = IsTokenValid
-                ? $"Token valid (ID: {tokenInfo.Id})"
-                : $"Token status: {tokenInfo.Status}";
+                ? $"Token 有效 (ID: {tokenInfo.Id})"
+                : $"Token 状态: {tokenInfo.Status}";
         }
         catch (Exception ex)
         {
             IsTokenValid = false;
-            VerificationMessage = $"Verification failed: {ex.Message}";
+            VerificationMessage = $"验证失败: {ex.Message}";
         }
         finally
         {
@@ -107,7 +107,7 @@ public partial class SettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            VerificationMessage = $"Failed to load projects: {ex.Message}";
+            VerificationMessage = $"加载项目失败: {ex.Message}";
         }
     }
 
@@ -119,6 +119,6 @@ public partial class SettingsViewModel : ObservableObject
         _configService.Config.SelectedProject = SelectedProject;
         _configService.Config.ChunkSizeMB = ChunkSizeMB;
         await _configService.SaveAsync();
-        VerificationMessage = "Settings saved successfully";
+        VerificationMessage = "设置已保存";
     }
 }

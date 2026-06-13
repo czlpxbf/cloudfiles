@@ -12,7 +12,7 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <TextBlock Grid.Row="0" Text="Upload Files"
+        <TextBlock Grid.Row="0" Text="上传文件"
                    Foreground="#cdd6f4" FontSize="24" FontWeight="Bold" Margin="0,0,0,16" />
 
         <!-- Remote Path Prefix -->
@@ -21,7 +21,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="Remote path prefix:"
+            <TextBlock Grid.Column="0" Text="远程路径前缀:"
                        Foreground="#a6adc8" FontSize="14" VerticalAlignment="Center" Margin="0,0,12,0" />
             <TextBox Grid.Column="1"
                      Text="{Binding RemotePathPrefix, UpdateSourceTrigger=PropertyChanged}"
@@ -30,7 +30,7 @@
         </Grid>
 
         <!-- Browse Button -->
-        <Button Grid.Row="2" Content="📁 Browse Files"
+        <Button Grid.Row="2" Content="📁 选择文件"
                 Command="{Binding BrowseFilesCommand}"
                 Style="{StaticResource ActionButton}"
                 HorizontalAlignment="Left"
@@ -51,10 +51,10 @@
                   GridLinesVisibility="Horizontal"
                   HorizontalGridLinesBrush="#313244">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="File" Binding="{Binding FileName}" Width="*" />
-                <DataGridTextColumn Header="Size" Binding="{Binding FormattedSize}" Width="100" />
-                <DataGridTextColumn Header="Remote Path" Binding="{Binding RemotePath}" Width="300" />
-                <DataGridTemplateColumn Header="Action" Width="80">
+                <DataGridTextColumn Header="文件名" Binding="{Binding FileName}" Width="*" />
+                <DataGridTextColumn Header="大小" Binding="{Binding FormattedSize}" Width="100" />
+                <DataGridTextColumn Header="远程路径" Binding="{Binding RemotePath}" Width="300" />
+                <DataGridTemplateColumn Header="操作" Width="80">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Button Content="✕" Command="{Binding DataContext.RemoveItemCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
@@ -83,7 +83,7 @@
                            Foreground="#a6adc8" FontSize="13" Margin="0,4,0,0" />
             </StackPanel>
 
-            <Button Grid.Column="1" Content="⬆ Upload All"
+            <Button Grid.Column="1" Content="⬆ 全部上传"
                     Command="{Binding UploadAllCommand}"
                     Style="{StaticResource AccentButton}" />
         </Grid>

@@ -26,7 +26,7 @@ public partial class UploadViewModel : ObservableObject
     private double _uploadProgress;
 
     [ObservableProperty]
-    private string _statusMessage = "Select files to upload";
+    private string _statusMessage = "选择要上传的文件";
 
     [ObservableProperty]
     private string _remotePathPrefix = "/";
@@ -55,7 +55,7 @@ public partial class UploadViewModel : ObservableObject
         var dialog = new OpenFileDialog
         {
             Multiselect = true,
-            Title = "Select files to upload"
+            Title = "选择要上传的文件"
         };
 
         if (dialog.ShowDialog() == true)
@@ -72,7 +72,7 @@ public partial class UploadViewModel : ObservableObject
                     ContentType = GetContentType(fileInfo.Extension)
                 });
             }
-            StatusMessage = $"{UploadItems.Count} file(s) selected";
+            StatusMessage = $"已选择 {UploadItems.Count} 个文件";
         }
     }
 
@@ -88,14 +88,14 @@ public partial class UploadViewModel : ObservableObject
     {
         if (UploadItems.Count == 0)
         {
-            StatusMessage = "No files selected";
+            StatusMessage = "未选择文件";
             return;
         }
 
         if (string.IsNullOrEmpty(_configService.Config.AccountId) ||
             string.IsNullOrEmpty(_configService.Config.SelectedProject))
         {
-            StatusMessage = "Please configure account ID and project in Settings";
+            StatusMessage = "请先在设置中配置账户 ID 和项目";
             return;
         }
 
@@ -103,7 +103,7 @@ public partial class UploadViewModel : ObservableObject
         {
             IsUploading = true;
             UploadProgress = 0;
-            StatusMessage = "Uploading...";
+            StatusMessage = "上传中...";
 
             var files = new List<(string remotePath, byte[] bytes, string contentType)>();
 
@@ -116,7 +116,7 @@ public partial class UploadViewModel : ObservableObject
             _uploadService.ProgressChanged += (s, e) =>
             {
                 UploadProgress = e.Progress * 100;
-                StatusMessage = $"Uploading... {UploadProgress:F0}%";
+                StatusMessage = $"上传中... {UploadProgress:F0}%";
             };
 
             var urls = await _uploadService.UploadFilesAsync(
@@ -124,12 +124,12 @@ public partial class UploadViewModel : ObservableObject
                 _configService.Config.SelectedProject,
                 files);
 
-            StatusMessage = $"Upload complete! {urls.Count} file(s) deployed";
+            StatusMessage = $"上传完成! 已部署 {urls.Count} 个文件";
             UploadItems.Clear();
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Upload failed: {ex.Message}";
+            StatusMessage = $"上传失败: {ex.Message}";
         }
         finally
         {

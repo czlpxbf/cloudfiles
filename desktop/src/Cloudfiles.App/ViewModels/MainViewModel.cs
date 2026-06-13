@@ -11,27 +11,27 @@ public partial class MainViewModel : ObservableObject
     private ObservableObject _currentView = new FileListViewModel();
 
     [ObservableProperty]
-    private string _statusText = "Ready";
+    private string _statusText = "就绪";
 
     [RelayCommand]
     private void NavigateToFiles()
     {
         CurrentView = new FileListViewModel();
-        StatusText = "File browser";
+        StatusText = "部署列表";
     }
 
     [RelayCommand]
     private void NavigateToUpload()
     {
         CurrentView = new UploadViewModel();
-        StatusText = "Upload files";
+        StatusText = "上传文件";
     }
 
     [RelayCommand]
     private void NavigateToSettings()
     {
         CurrentView = new SettingsViewModel();
-        StatusText = "Settings";
+        StatusText = "设置";
     }
 
     [RelayCommand]

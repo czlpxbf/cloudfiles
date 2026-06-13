@@ -15,7 +15,7 @@
             </Grid.RowDefinitions>
 
             <!-- Header -->
-            <TextBlock Grid.Row="0" Text="Settings"
+            <TextBlock Grid.Row="0" Text="设置"
                        Foreground="#cdd6f4" FontSize="24" FontWeight="Bold" Margin="0,0,0,24" />
 
             <!-- API Token -->
@@ -26,7 +26,7 @@
                              Padding="10,8" FontSize="14"
                              PasswordChanged="ApiTokenBox_PasswordChanged" />
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="Verify Token" Command="{Binding VerifyTokenCommand}"
+                    <Button Content="验证 Token" Command="{Binding VerifyTokenCommand}"
                             Style="{StaticResource ActionButton}" Margin="0" />
                     <TextBlock Text="{Binding VerificationMessage}"
                                Foreground="{Binding IsTokenValid, Converter={StaticResource BoolToColorConverter}}"
@@ -36,7 +36,7 @@
 
             <!-- Account ID -->
             <StackPanel Grid.Row="2" Margin="0,0,0,20">
-                <TextBlock Text="Account ID" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
+                <TextBlock Text="账户 ID" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
                 <TextBox Text="{Binding AccountId, UpdateSourceTrigger=PropertyChanged}"
                          Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
                          Padding="10,8" FontSize="14" />
@@ -45,8 +45,8 @@
             <!-- Project Selection -->
             <StackPanel Grid.Row="3" Margin="0,0,0,20">
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="Project" Foreground="#a6adc8" FontSize="14" VerticalAlignment="Center" />
-                    <Button Content="Load Projects" Command="{Binding LoadProjectsCommand}"
+                    <TextBlock Text="项目" Foreground="#a6adc8" FontSize="14" VerticalAlignment="Center" />
+                    <Button Content="加载项目" Command="{Binding LoadProjectsCommand}"
                             Style="{StaticResource ActionButton}" Margin="12,0,0,0" Padding="8,4" />
                 </StackPanel>
                 <ComboBox ItemsSource="{Binding Projects}"
@@ -58,14 +58,14 @@
 
             <!-- Chunk Size -->
             <StackPanel Grid.Row="4" Margin="0,0,0,20">
-                <TextBlock Text="Chunk Size (MB)" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
+                <TextBlock Text="分块大小 (MB)" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
                 <TextBox Text="{Binding ChunkSizeMB, UpdateSourceTrigger=PropertyChanged}"
                          Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
                          Padding="10,8" FontSize="14" />
             </StackPanel>
 
             <!-- Save Button -->
-            <Button Grid.Row="5" Content="💾 Save Settings"
+            <Button Grid.Row="5" Content="💾 保存设置"
                     Command="{Binding SaveCommand}"
                     Style="{StaticResource AccentButton}"
                     HorizontalAlignment="Left" />
@@ -73,13 +73,13 @@
             <!-- Info -->
             <Border Grid.Row="6" Background="#313244" CornerRadius="8" Padding="16" Margin="0,24,0,0">
                 <StackPanel>
-                    <TextBlock Text="How to get your API Token &amp; Account ID"
+                    <TextBlock Text="如何获取 API Token 和账户 ID"
                                Foreground="#89b4fa" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8" />
                     <TextBlock TextWrapping="Wrap" Foreground="#a6adc8" FontSize="13" LineHeight="20">
-                        <Run Text="1. Go to https://dash.cloudflare.com/profile/api-tokens" /><LineBreak />
-                        <Run Text="2. Create a token with Cloudflare Pages edit permissions" /><LineBreak />
-                        <Run Text="3. Your Account ID is found in the Cloudflare dashboard URL" /><LineBreak />
-                        <Run Text="4. Create a Pages project first, then select it here" />
+                        <Run Text="1. 访问 https://dash.cloudflare.com/profile/api-tokens" /><LineBreak />
+                        <Run Text="2. 创建一个具有 Cloudflare Pages 编辑权限的 Token" /><LineBreak />
+                        <Run Text="3. 账户 ID 可在 Cloudflare 控制台 URL 中找到" /><LineBreak />
+                        <Run Text="4. 先创建 Pages 项目，然后在此选择" />
                     </TextBlock>
                 </StackPanel>
             </Border>
