@@ -16,6 +16,11 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _apiToken = "";
 
+    partial void OnApiTokenChanged(string value)
+    {
+        _apiClient.SetApiToken(value);
+    }
+
     [ObservableProperty]
     private string _accountId = "";
 
