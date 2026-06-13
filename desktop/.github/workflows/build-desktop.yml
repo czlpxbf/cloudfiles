@@ -1,0 +1,36 @@
+name: Build Desktop
+
+on:
+  push:
+    tags:
+      - 'v3*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish src/Cloudfiles.App/Cloudfiles.App.csproj --configuration Release --no-build --output ./publish
+
+      - name: Create ZIP archive
+        run: Compress-Archive -Path ./publish/* -DestinationPath ./Cloudfiles-desktop-win-x64.zip
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./Cloudfiles-desktop-win-x64.zip
