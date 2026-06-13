@@ -12,7 +12,9 @@ public class FileEntry
     public List<string> Chunks { get; set; } = new();
     public int VersionCount { get; set; }
 
-    public string FormattedSize => FormatFileSize(Size);
+    public string FormattedSize => IsFolder ? "" : FormatFileSize(Size);
+
+    public string VersionDisplay => IsFolder ? "文件夹" : $"{VersionCount} 个版本";
 
     private static string FormatFileSize(long bytes)
     {

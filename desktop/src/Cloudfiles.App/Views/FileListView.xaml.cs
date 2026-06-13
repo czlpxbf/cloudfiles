@@ -11,27 +11,18 @@ public partial class FileListView : System.Windows.Controls.UserControl
         InitializeComponent();
     }
 
-    private void OpenProjectHome_Click(object sender, MouseButtonEventArgs e)
-    {
-        if (DataContext is ViewModels.FileListViewModel vm && !string.IsNullOrEmpty(vm.ProjectUrl))
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = vm.ProjectUrl,
-                    UseShellExecute = true
-                });
-            }
-            catch { }
-        }
-    }
-
     private void FileList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (DataContext is ViewModels.FileListViewModel vm && vm.SelectedFile is FileEntry entry && entry.IsFolder)
+        if (DataContext is ViewModels.FileListViewModel vm && vm.SelectedFile is FileEntry entry)
         {
-            vm.OpenFolderCommand.Execute(entry);
+            if (entry.IsFolder)
+            {
+                vm.OpenFolderCommand.Execute(entry);
+            }
+            else
+            {
+                vm.ShowVersionHistoryCommand.Execute(entry);
+            }
         }
     }
 }

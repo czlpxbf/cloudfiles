@@ -19,30 +19,16 @@
         </StackPanel>
 
         <!-- Toolbar -->
-        <Grid Grid.Row="1" Margin="0,0,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <Button Grid.Column="0" Content="上传"
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
+            <Button Content="下载" Command="{Binding DownloadItemCommand}"
                     Style="{StaticResource ActionButton}" />
-            <Button Grid.Column="1" Content="下载"
+            <Button Content="删除" Command="{Binding DeleteItemCommand}"
                     Style="{StaticResource ActionButton}" />
-            <Button Grid.Column="2" Content="刷新"
-                    Command="{Binding RefreshCommand}"
+            <Button Content="刷新" Command="{Binding RefreshCommand}"
                     Style="{StaticResource ActionButton}" />
-            <Button Grid.Column="3" Content="新建文件夹"
+            <Button Content="新建文件夹" Command="{Binding NewFolderCommand}"
                     Style="{StaticResource ActionButton}" />
-            <TextBlock Grid.Column="5" Text="打开项目主页"
-                       Foreground="#89b4fa" FontSize="13"
-                       VerticalAlignment="Center" Cursor="Hand"
-                       MouseDown="OpenProjectHome_Click" />
-        </Grid>
+        </StackPanel>
 
         <!-- Error Message -->
         <TextBlock Grid.Row="2" Text="{Binding ErrorMessage}"
@@ -72,15 +58,33 @@
                         </Trigger>
                     </Style.Triggers>
                 </Style>
+
+                <!-- Right-click Context Menu -->
+                <ContextMenu x:Key="ItemContextMenu">
+                    <MenuItem Header="下载" Command="{Binding DataContext.DownloadItemCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                             CommandParameter="{Binding}" />
+                    <MenuItem Header="删除" Command="{Binding DataContext.DeleteItemCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                             CommandParameter="{Binding}" />
+                    <MenuItem Header="重命名" Command="{Binding DataContext.RenameItemCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                             CommandParameter="{Binding}" />
+                    <Separator />
+                    <MenuItem Header="版本历史" Command="{Binding DataContext.ShowVersionHistoryCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                             CommandParameter="{Binding}" />
+                </ContextMenu>
             </ListView.Resources>
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem" BasedOn="{StaticResource {x:Type ListViewItem}}">
+                    <Setter Property="ContextMenu" Value="{StaticResource ItemContextMenu}" />
+                </Style>
+            </ListView.ItemContainerStyle>
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="名称" Width="300"
                                     DisplayMemberBinding="{Binding Name}" />
                     <GridViewColumn Header="大小" Width="120"
-                                    DisplayMemberBinding="{Binding Size, Converter={StaticResource FileSizeConverter}}" />
-                    <GridViewColumn Header="类型" Width="100"
-                                    DisplayMemberBinding="{Binding IsFolder, Converter={StaticResource FileTypeConverter}}" />
+                                    DisplayMemberBinding="{Binding FormattedSize}" />
+                    <GridViewColumn Header="版本" Width="100"
+                                    DisplayMemberBinding="{Binding VersionDisplay}" />
                     <GridViewColumn Header="修改时间" Width="200"
                                     DisplayMemberBinding="{Binding LastModified, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" />
                 </GridView>

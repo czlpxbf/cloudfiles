@@ -2,11 +2,13 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cloudfiles.Core.Api;
 using Cloudfiles.Core.Models;
 using Cloudfiles.Core.Services;
+using Microsoft.Win32;
 
 namespace Cloudfiles.App.ViewModels;
 
@@ -14,6 +16,7 @@ public partial class FileListViewModel : ObservableObject
 {
     private readonly CloudflareApiClient _apiClient;
     private readonly ConfigService _configService;
+    private readonly DownloadService _downloadService;
 
     [ObservableProperty]
     private ObservableCollection<FileEntry> _files = new();
@@ -43,6 +46,7 @@ public partial class FileListViewModel : ObservableObject
         var httpClient = new HttpClient();
         _apiClient = new CloudflareApiClient(httpClient);
         _configService = new ConfigService();
+        _downloadService = new DownloadService(_apiClient);
         _ = InitializeAsync();
     }
 
@@ -252,19 +256,552 @@ public partial class FileListViewModel : ObservableObject
         return current;
     }
 
+    #region 删除
+
     [RelayCommand]
-    private void OpenProjectUrl()
+    private async Task DeleteItem(FileEntry? entry)
     {
-        if (string.IsNullOrEmpty(ProjectUrl)) return;
+        if (entry == null)
+        {
+            if (SelectedFile == null)
+            {
+                ErrorMessage = "请先选择要删除的文件或文件夹";
+                return;
+            }
+            entry = SelectedFile;
+        }
+
+        var confirm = System.Windows.MessageBox.Show(
+            $"确定要删除 \"{entry.Name}\" 吗？{(entry.IsFolder ? "文件夹及其所有内容将被删除。" : "文件的所有版本将被删除。")}",
+            "确认删除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            IsLoading = true;
+            ErrorMessage = "";
+
+            var index = await DownloadCurrentIndexAsync();
+            if (index == null) return;
+
+            var itemPath = entry.Path;
+            var parts = itemPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
             {
-                FileName = ProjectUrl,
-                UseShellExecute = true
+                ErrorMessage = "不能删除根目录";
+                return;
+            }
+
+            // 导航到父节点
+            var indexDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(index.Value.GetRawText())!;
+            var fsRoot = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(indexDict["fs_root"].GetRawText())!;
+            var currentChildren = fsRoot;
+
+            for (var i = 0; i < parts.Length - 1; i++)
+            {
+                if (!currentChildren.TryGetValue(parts[i], out var childNode))
+                {
+                    ErrorMessage = $"未找到路径: {itemPath}";
+                    return;
+                }
+                var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+                if (!folderDict.TryGetValue("children", out var nextChildren))
+                {
+                    ErrorMessage = $"路径错误: {parts[i]} 不是文件夹";
+                    return;
+                }
+                currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+            }
+
+            var leafName = parts[^1];
+            if (!currentChildren.ContainsKey(leafName))
+            {
+                ErrorMessage = $"未找到: {leafName}";
+                return;
+            }
+
+            currentChildren.Remove(leafName);
+
+            // 更新父文件夹时间戳
+            var now = DateTime.UtcNow.ToString("o");
+            UpdateParentTimestampsInDict(fsRoot, parts, now);
+            fsRoot["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+
+            // 重建并部署
+            indexDict["fs_root"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fsRoot));
+            var updatedJson = JsonSerializer.Serialize(indexDict, new JsonSerializerOptions { WriteIndented = true });
+            await _apiClient.DeployMainJsonAsync(_configService.Config.AccountId, _configService.Config.SelectedProject, updatedJson);
+
+            await LoadFileListAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"删除失败: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    #endregion
+
+    #region 新建文件夹
+
+    [RelayCommand]
+    private async Task NewFolder()
+    {
+        var input = ShowInputDialog("新建文件夹", "请输入文件夹名称:");
+        if (string.IsNullOrWhiteSpace(input)) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = "";
+
+            var index = await DownloadCurrentIndexAsync();
+            if (index == null) return;
+
+            var indexDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(index.Value.GetRawText())!;
+            var fsRoot = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(indexDict["fs_root"].GetRawText())!;
+
+            // 导航到当前目录
+            var parts = CurrentPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var currentChildren = fsRoot;
+
+            foreach (var part in parts)
+            {
+                if (!currentChildren.TryGetValue(part, out var childNode))
+                {
+                    ErrorMessage = $"路径错误: {part}";
+                    return;
+                }
+                var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+                if (!folderDict.TryGetValue("children", out var nextChildren))
+                {
+                    ErrorMessage = $"路径错误: {part} 不是文件夹";
+                    return;
+                }
+                currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+            }
+
+            // 检查是否已存在
+            if (currentChildren.ContainsKey(input))
+            {
+                ErrorMessage = $"\"{input}\" 已存在";
+                return;
+            }
+
+            // 创建文件夹节点
+            var now = DateTime.UtcNow.ToString("o");
+            var newFolder = new
+            {
+                type = "folder",
+                createdAt = now,
+                modifiedAt = now,
+                children = new { }
+            };
+            currentChildren[input] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(newFolder));
+
+            // 更新时间戳
+            var allParts = parts.Concat(new[] { input }).ToArray();
+            UpdateParentTimestampsInDict(fsRoot, allParts, now);
+            fsRoot["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+
+            // 重建并部署
+            indexDict["fs_root"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fsRoot));
+            var updatedJson = JsonSerializer.Serialize(indexDict, new JsonSerializerOptions { WriteIndented = true });
+            await _apiClient.DeployMainJsonAsync(_configService.Config.AccountId, _configService.Config.SelectedProject, updatedJson);
+
+            await LoadFileListAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"新建文件夹失败: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    #endregion
+
+    #region 重命名
+
+    [RelayCommand]
+    private async Task RenameItem(FileEntry? entry)
+    {
+        if (entry == null) entry = SelectedFile;
+        if (entry == null)
+        {
+            ErrorMessage = "请先选择要重命名的文件或文件夹";
+            return;
+        }
+
+        var input = ShowInputDialog("重命名", "请输入新名称:", entry.Name);
+        if (string.IsNullOrWhiteSpace(input) || input == entry.Name) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = "";
+
+            var index = await DownloadCurrentIndexAsync();
+            if (index == null) return;
+
+            var indexDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(index.Value.GetRawText())!;
+            var fsRoot = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(indexDict["fs_root"].GetRawText())!;
+
+            // 导航到当前目录
+            var parts = CurrentPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var currentChildren = fsRoot;
+
+            foreach (var part in parts)
+            {
+                if (!currentChildren.TryGetValue(part, out var childNode))
+                {
+                    ErrorMessage = $"路径错误: {part}";
+                    return;
+                }
+                var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+                if (!folderDict.TryGetValue("children", out var nextChildren))
+                {
+                    ErrorMessage = $"路径错误: {part} 不是文件夹";
+                    return;
+                }
+                currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+            }
+
+            // 检查新名称是否已存在
+            if (currentChildren.ContainsKey(input))
+            {
+                ErrorMessage = $"\"{input}\" 已存在";
+                return;
+            }
+
+            // 取出旧节点，以新名称插入
+            if (!currentChildren.TryGetValue(entry.Name, out var nodeToMove))
+            {
+                ErrorMessage = $"未找到: {entry.Name}";
+                return;
+            }
+
+            currentChildren.Remove(entry.Name);
+            currentChildren[input] = nodeToMove;
+
+            // 更新时间戳
+            var now = DateTime.UtcNow.ToString("o");
+            var allParts = parts.Concat(new[] { input }).ToArray();
+            UpdateParentTimestampsInDict(fsRoot, allParts, now);
+            fsRoot["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+
+            // 重建并部署
+            indexDict["fs_root"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fsRoot));
+            var updatedJson = JsonSerializer.Serialize(indexDict, new JsonSerializerOptions { WriteIndented = true });
+            await _apiClient.DeployMainJsonAsync(_configService.Config.AccountId, _configService.Config.SelectedProject, updatedJson);
+
+            await LoadFileListAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"重命名失败: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    #endregion
+
+    #region 下载
+
+    [RelayCommand]
+    private async Task DownloadItem(FileEntry? entry)
+    {
+        if (entry == null) entry = SelectedFile;
+        if (entry == null)
+        {
+            ErrorMessage = "请先选择要下载的文件";
+            return;
+        }
+
+        if (entry.IsFolder)
+        {
+            ErrorMessage = "暂不支持下载文件夹，请选择文件";
+            return;
+        }
+
+        if (entry.Chunks.Count == 0)
+        {
+            ErrorMessage = "该文件没有分块数据";
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = entry.Name,
+            Title = "保存文件"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = "";
+
+            _downloadService.ProgressChanged += OnDownloadProgress;
+            await _downloadService.DownloadToFileAsync(entry.Chunks, dialog.FileName);
+            _downloadService.ProgressChanged -= OnDownloadProgress;
+
+            System.Windows.MessageBox.Show($"文件已保存到: {dialog.FileName}", "下载完成", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"下载失败: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+            _downloadService.ProgressChanged -= OnDownloadProgress;
+        }
+    }
+
+    private void OnDownloadProgress(object? sender, DownloadProgressEventArgs e)
+    {
+        // 可以在这里更新进度显示
+    }
+
+    /// <summary>
+    /// 下载指定版本的文件
+    /// </summary>
+    public async Task DownloadVersionAsync(List<string> chunkUrls, string fileName)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = fileName,
+            Title = "保存文件"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = "";
+
+            await _downloadService.DownloadToFileAsync(chunkUrls, dialog.FileName);
+
+            System.Windows.MessageBox.Show($"文件已保存到: {dialog.FileName}", "下载完成", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"下载失败: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    #endregion
+
+    #region 版本历史
+
+    [RelayCommand]
+    private void ShowVersionHistory(FileEntry? entry)
+    {
+        if (entry == null) entry = SelectedFile;
+        if (entry == null || entry.IsFolder) return;
+
+        // 获取该文件的所有版本
+        var node = FindNodeAtPath(entry.Path);
+        if (node == null) return;
+
+        if (node.Value.ValueKind != JsonValueKind.Array) return;
+
+        var versions = new List<FileVersionInfo>();
+        var versionArray = node.Value.EnumerateArray().ToList();
+
+        for (var i = 0; i < versionArray.Count; i++)
+        {
+            var v = versionArray[i];
+            var chunks = new List<string>();
+            if (v.TryGetProperty("chunks", out var chunksProp))
+            {
+                foreach (var chunk in chunksProp.EnumerateArray())
+                {
+                    chunks.Add(chunk.GetString() ?? "");
+                }
+            }
+
+            versions.Add(new FileVersionInfo
+            {
+                Index = i + 1,
+                CreatedAt = TryGetDateTime(v, "createdAt")?.ToString("yyyy-MM-dd HH:mm:ss") ?? "未知",
+                Size = v.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0,
+                FormattedSize = FormatFileSize(v.TryGetProperty("size", out var sp) ? sp.GetInt64() : 0),
+                Chunks = chunks,
+                FileName = entry.Name
             });
         }
-        catch { }
+
+        var dialog = new Views.VersionHistoryDialog(versions, this);
+        dialog.ShowDialog();
+    }
+
+    #endregion
+
+    #region 辅助方法
+
+    private async Task<JsonElement?> DownloadCurrentIndexAsync()
+    {
+        if (string.IsNullOrEmpty(ProjectUrl))
+        {
+            await LoadProjectUrlAsync();
+        }
+
+        if (string.IsNullOrEmpty(ProjectUrl))
+        {
+            ErrorMessage = "请先在设置中配置项目";
+            return null;
+        }
+
+        try
+        {
+            return await _apiClient.GetFileIndexAsync(ProjectUrl);
+        }
+        catch
+        {
+            // 如果 main.json 不存在，创建默认结构
+            var defaultIndex = new
+            {
+                fs_root = new
+                {
+                    type = "folder",
+                    createdAt = DateTime.UtcNow.ToString("o"),
+                    modifiedAt = DateTime.UtcNow.ToString("o"),
+                    children = new { }
+                }
+            };
+            var defaultJson = JsonSerializer.Serialize(defaultIndex);
+            return JsonSerializer.Deserialize<JsonElement>(defaultJson);
+        }
+    }
+
+    private static void UpdateParentTimestampsInDict(Dictionary<string, JsonElement> rootChildren, string[] parts, string now)
+    {
+        var currentChildren = rootChildren;
+        for (var i = 0; i < parts.Length - 1; i++)
+        {
+            var part = parts[i];
+            if (!currentChildren.TryGetValue(part, out var childNode)) break;
+
+            var folderDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childNode.GetRawText())!;
+            folderDict["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+            currentChildren[part] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(folderDict));
+
+            if (folderDict.TryGetValue("children", out var nextChildren))
+            {
+                currentChildren = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(nextChildren.GetRawText())!;
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+
+    private static string? ShowInputDialog(string title, string prompt, string defaultValue = "")
+    {
+        var bgColor = System.Windows.Media.ColorConverter.ConvertFromString("#1e1e2e")!;
+        var textColor = System.Windows.Media.ColorConverter.ConvertFromString("#cdd6f4")!;
+        var surfaceColor = System.Windows.Media.ColorConverter.ConvertFromString("#313244")!;
+        var borderColor = System.Windows.Media.ColorConverter.ConvertFromString("#45475a")!;
+        var accentColor = System.Windows.Media.ColorConverter.ConvertFromString("#89b4fa")!;
+        var darkColor = System.Windows.Media.ColorConverter.ConvertFromString("#1e1e2e")!;
+
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 400,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)bgColor)
+        };
+
+        var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(24) };
+
+        var label = new System.Windows.Controls.TextBlock
+        {
+            Text = prompt,
+            Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)textColor),
+            FontSize = 14,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        stack.Children.Add(label);
+
+        var input = new System.Windows.Controls.TextBox
+        {
+            Text = defaultValue,
+            FontSize = 14,
+            Padding = new Thickness(10, 8, 10, 8),
+            Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)surfaceColor),
+            Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)textColor),
+            BorderBrush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)borderColor),
+            CaretBrush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)accentColor)
+        };
+        input.SelectAll();
+        stack.Children.Add(input);
+
+        var btnPanel = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+            Margin = new Thickness(0, 16, 0, 0)
+        };
+
+        var okBtn = new System.Windows.Controls.Button
+        {
+            Content = "确定",
+            Padding = new Thickness(24, 8, 24, 8),
+            Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)accentColor),
+            Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)darkColor),
+            BorderThickness = new Thickness(0),
+            FontWeight = FontWeights.SemiBold,
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+
+        var cancelBtn = new System.Windows.Controls.Button
+        {
+            Content = "取消",
+            Padding = new Thickness(24, 8, 24, 8),
+            Margin = new Thickness(8, 0, 0, 0),
+            Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)surfaceColor),
+            Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)textColor),
+            BorderThickness = new Thickness(0),
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+
+        string? result = null;
+        okBtn.Click += (s, e) => { result = input.Text; dialog.DialogResult = true; dialog.Close(); };
+        cancelBtn.Click += (s, e) => { dialog.DialogResult = false; dialog.Close(); };
+
+        btnPanel.Children.Add(okBtn);
+        btnPanel.Children.Add(cancelBtn);
+        stack.Children.Add(btnPanel);
+
+        dialog.Content = stack;
+        input.Focus();
+
+        var dialogResult = dialog.ShowDialog();
+        return dialogResult == true ? result : null;
     }
 
     private static DateTime? TryGetDateTime(JsonElement element, string propertyName)
@@ -279,4 +816,30 @@ public partial class FileListViewModel : ObservableObject
         }
         return null;
     }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes == 0) return "0 B";
+        string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < suffixes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {suffixes[order]}";
+    }
+
+    #endregion
+}
+
+public class FileVersionInfo
+{
+    public int Index { get; set; }
+    public string CreatedAt { get; set; } = "";
+    public long Size { get; set; }
+    public string FormattedSize { get; set; } = "";
+    public List<string> Chunks { get; set; } = new();
+    public string FileName { get; set; } = "";
 }
