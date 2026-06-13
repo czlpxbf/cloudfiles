@@ -4,7 +4,7 @@ using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.App.Views;
 
-public partial class FileListView : UserControl
+public partial class FileListView : System.Windows.Controls.UserControl
 {
     public FileListView()
     {

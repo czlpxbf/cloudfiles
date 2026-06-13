@@ -154,7 +154,8 @@ public partial class FileListViewModel : ObservableObject
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
-                var latestVersion = value.EnumerateArray().LastOrDefault();
+                var versions = value.EnumerateArray().ToList();
+                var latestVersion = versions.LastOrDefault();
                 if (latestVersion.ValueKind != JsonValueKind.Undefined &&
                     latestVersion.TryGetProperty("type", out var fileType) &&
                     fileType.GetString() == "file")
@@ -176,7 +177,8 @@ public partial class FileListViewModel : ObservableObject
                         Size = latestVersion.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0,
                         LastModified = TryGetDateTime(latestVersion, "modifiedAt") ?? TryGetDateTime(latestVersion, "createdAt"),
                         ChunkCount = chunks.Count,
-                        Chunks = chunks
+                        Chunks = chunks,
+                        VersionCount = versions.Count
                     });
                 }
             }

@@ -37,13 +37,13 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Minimize()
     {
-        Application.Current.MainWindow.WindowState = WindowState.Minimized;
+        System.Windows.Application.Current.MainWindow.WindowState = WindowState.Minimized;
     }
 
     [RelayCommand]
     private void Maximize()
     {
-        var window = Application.Current.MainWindow;
+        var window = System.Windows.Application.Current.MainWindow;
         window.WindowState = window.WindowState == WindowState.Maximized
             ? WindowState.Normal
             : WindowState.Maximized;
@@ -52,6 +52,6 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Close()
     {
-        Application.Current.MainWindow.Close();
+        System.Windows.Application.Current.MainWindow.Close();
     }
 }

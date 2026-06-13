@@ -1,51 +1,88 @@
 using Cloudfiles.Core.Api;
-using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.Core.Services;
 
 public class DownloadService
 {
-    private readonly HttpClient _httpClient;
+    private readonly CloudflareApiClient _apiClient;
 
-    public DownloadService(HttpClient httpClient)
+    public DownloadService(CloudflareApiClient apiClient)
     {
-        _httpClient = httpClient;
+        _apiClient = apiClient;
     }
 
     public event EventHandler<DownloadProgressEventArgs>? ProgressChanged;
 
-    public async Task<byte[]> DownloadFileAsync(string url)
+    /// <summary>
+    /// 并行下载分块并合并为完整字节数组
+    /// </summary>
+    /// <param name="chunkUrls">分块 URL 列表（按顺序）</param>
+    /// <returns>合并后的字节数组</returns>
+    public async Task<byte[]> DownloadAndMergeChunksAsync(List<string> chunkUrls)
     {
-        var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-
-        var totalBytes = response.Content.Headers.ContentLength ?? 0;
-        using var stream = await response.Content.ReadAsStreamAsync();
-        using var memoryStream = new MemoryStream();
-
-        var buffer = new byte[8192];
-        int bytesRead;
-        long totalRead = 0;
-
-        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        if (chunkUrls.Count == 0)
         {
-            await memoryStream.WriteAsync(buffer, 0, bytesRead);
-            totalRead += bytesRead;
+            return Array.Empty<byte>();
+        }
 
-            ProgressChanged?.Invoke(this, new DownloadProgressEventArgs
+        var totalChunks = chunkUrls.Count;
+        var completedChunks = 0;
+        var chunkData = new byte[totalChunks][];
+
+        // 使用 SemaphoreSlim 限制并发数为 4
+        using var semaphore = new SemaphoreSlim(4);
+        var tasks = new List<Task>();
+
+        for (var i = 0; i < totalChunks; i++)
+        {
+            var index = i;
+            await semaphore.WaitAsync();
+
+            var task = Task.Run(async () =>
             {
-                BytesDownloaded = totalRead,
-                TotalBytes = totalBytes,
-                Url = url
+                try
+                {
+                    chunkData[index] = await _apiClient.DownloadChunkAsync(chunkUrls[index]);
+
+                    Interlocked.Increment(ref completedChunks);
+                    var progress = (double)completedChunks / totalChunks * 100;
+                    ProgressChanged?.Invoke(this, new DownloadProgressEventArgs
+                    {
+                        CompletedChunks = completedChunks,
+                        TotalChunks = totalChunks,
+                        Progress = progress
+                    });
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
             });
+
+            tasks.Add(task);
+        }
+
+        await Task.WhenAll(tasks);
+
+        // 按顺序合并所有分块
+        using var memoryStream = new MemoryStream();
+        foreach (var data in chunkData)
+        {
+            if (data != null)
+            {
+                await memoryStream.WriteAsync(data, 0, data.Length);
+            }
         }
 
         return memoryStream.ToArray();
     }
 
-    public async Task DownloadFileToDiskAsync(string url, string localPath)
+    /// <summary>
+    /// 下载分块并保存到本地文件
+    /// </summary>
+    public async Task DownloadToFileAsync(List<string> chunkUrls, string localPath)
     {
-        var fileBytes = await DownloadFileAsync(url);
+        var fileBytes = await DownloadAndMergeChunksAsync(chunkUrls);
 
         var directory = Path.GetDirectoryName(localPath);
         if (!string.IsNullOrEmpty(directory))
@@ -59,8 +96,7 @@ public class DownloadService
 
 public class DownloadProgressEventArgs : EventArgs
 {
-    public long BytesDownloaded { get; set; }
-    public long TotalBytes { get; set; }
-    public string Url { get; set; } = "";
-    public double Progress => TotalBytes > 0 ? (double)BytesDownloaded / TotalBytes : 0;
+    public int CompletedChunks { get; set; }
+    public int TotalChunks { get; set; }
+    public double Progress { get; set; }
 }

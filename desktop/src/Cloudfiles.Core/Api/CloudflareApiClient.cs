@@ -12,6 +12,12 @@ public class CloudflareApiClient
     private readonly HttpClient _httpClient;
     private string? _apiToken;
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
+
     public CloudflareApiClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
@@ -24,13 +30,30 @@ public class CloudflareApiClient
 
     public async Task<TokenInfo> VerifyTokenAsync()
     {
-        var request = CreateRequest(HttpMethod.Get, "https://api.cloudflare.com/client/v4/user/tokens/verify");
+        var request = CreateRequest(HttpMethod.Get,
+            "https://api.cloudflare.com/client/v4/user/tokens/verify");
         var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<CloudflareResponse<TokenInfo>>(json, JsonOptions);
-        return result?.Result ?? throw new InvalidOperationException("Failed to verify token");
+        return result?.Result ?? throw new InvalidOperationException("验证 Token 失败");
+    }
+
+    public async Task<string> GetAccountIdAsync()
+    {
+        var request = CreateRequest(HttpMethod.Get,
+            "https://api.cloudflare.com/client/v4/accounts");
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var result = JsonSerializer.Deserialize<CloudflareResponse<List<JsonElement>>>(json, JsonOptions);
+        var account = result?.Result?.FirstOrDefault()
+            ?? throw new InvalidOperationException("未找到账户信息");
+
+        return account.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("无法获取账户 ID");
     }
 
     public async Task<List<PagesProject>> ListProjectsAsync(string accountId)
@@ -54,23 +77,27 @@ public class CloudflareApiClient
 
         var json = await response.Content.ReadAsStringAsync();
         var result = JsonSerializer.Deserialize<CloudflareResponse<PagesProject>>(json, JsonOptions);
-        return result?.Result ?? throw new InvalidOperationException("Failed to get project info");
+        return result?.Result ?? throw new InvalidOperationException($"获取项目 {projectName} 失败");
     }
 
-    public async Task<JsonElement> GetFileIndexAsync(string projectUrl)
+    public async Task<PagesProject> CreateProjectAsync(string accountId, string projectName, string? productionBranch = null)
     {
-        var url = projectUrl.TrimEnd('/') + "/main.json";
-        var response = await _httpClient.GetAsync(url);
+        var body = new
+        {
+            name = projectName,
+            production_branch = productionBranch ?? "main"
+        };
+
+        var request = CreateRequest(HttpMethod.Post,
+            $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects");
+        request.Content = JsonContent.Create(body, options: JsonOptions);
+
+        var response = await _httpClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
-        return JsonSerializer.Deserialize<JsonElement>(json);
-    }
-
-    public async Task DeployMainJsonAsync(string accountId, string projectName, string jsonContent)
-    {
-        var bytes = Encoding.UTF8.GetBytes(jsonContent);
-        await DeployFileAsync(accountId, projectName, "/main.json", bytes, "application/json");
+        var result = JsonSerializer.Deserialize<CloudflareResponse<PagesProject>>(json, JsonOptions);
+        return result?.Result ?? throw new InvalidOperationException($"创建项目 {projectName} 失败");
     }
 
     public async Task<string> DeployFileAsync(string accountId, string projectName, string remotePath, byte[] fileBytes, string contentType)
@@ -84,6 +111,11 @@ public class CloudflareApiClient
 
     public async Task<List<string>> DeployFilesAsync(string accountId, string projectName, List<(string remotePath, byte[] bytes, string contentType)> files)
     {
+        if (files.Count == 0)
+        {
+            return new List<string>();
+        }
+
         // Step 1: Get upload JWT
         var jwtRequest = CreateRequest(HttpMethod.Get,
             $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects/{projectName}/upload-token");
@@ -93,9 +125,9 @@ public class CloudflareApiClient
         var jwtJson = await jwtResponse.Content.ReadAsStringAsync();
         var jwtResult = JsonSerializer.Deserialize<CloudflareResponse<JsonElement>>(jwtJson, JsonOptions);
         var jwt = jwtResult?.Result.GetProperty("jwt").GetString()
-            ?? throw new InvalidOperationException("Failed to get upload JWT");
+            ?? throw new InvalidOperationException("获取上传 JWT 失败");
 
-        // Step 2: Upload assets
+        // Step 2: Upload assets (base64 encoded)
         var uploadItems = new List<object>();
         var manifest = new Dictionary<string, string>();
 
@@ -115,7 +147,8 @@ public class CloudflareApiClient
             manifest[remotePath] = hash;
         }
 
-        var uploadRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.cloudflare.com/client/v4/pages/assets/upload");
+        var uploadRequest = new HttpRequestMessage(HttpMethod.Post,
+            "https://api.cloudflare.com/client/v4/pages/assets/upload");
         uploadRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
         uploadRequest.Content = JsonContent.Create(uploadItems);
         var uploadResponse = await _httpClient.SendAsync(uploadRequest);
@@ -123,7 +156,8 @@ public class CloudflareApiClient
 
         // Step 3: Upsert hashes
         var hashes = manifest.Values.ToList();
-        var upsertRequest = new HttpRequestMessage(HttpMethod.Post, "https://api.cloudflare.com/client/v4/pages/assets/upsert-hashes");
+        var upsertRequest = new HttpRequestMessage(HttpMethod.Post,
+            "https://api.cloudflare.com/client/v4/pages/assets/upsert-hashes");
         upsertRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
         upsertRequest.Content = JsonContent.Create(new { hashes });
         var upsertResponse = await _httpClient.SendAsync(upsertRequest);
@@ -158,6 +192,29 @@ public class CloudflareApiClient
         return urls;
     }
 
+    public async Task DeployMainJsonAsync(string accountId, string projectName, string jsonContent)
+    {
+        var bytes = Encoding.UTF8.GetBytes(jsonContent);
+        await DeployFileAsync(accountId, projectName, "/main.json", bytes, "application/json");
+    }
+
+    public async Task<JsonElement> GetFileIndexAsync(string projectUrl)
+    {
+        var url = projectUrl.TrimEnd('/') + "/main.json";
+        var response = await _httpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<JsonElement>(json);
+    }
+
+    public async Task<byte[]> DownloadChunkAsync(string url)
+    {
+        var response = await _httpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync();
+    }
+
     private HttpRequestMessage CreateRequest(HttpMethod method, string url)
     {
         var request = new HttpRequestMessage(method, url);
@@ -179,10 +236,4 @@ public class CloudflareApiClient
         var hashBytes = md5.ComputeHash(combined);
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        PropertyNameCaseInsensitive = true
-    };
 }

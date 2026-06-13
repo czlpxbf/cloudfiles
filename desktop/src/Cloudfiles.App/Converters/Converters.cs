@@ -61,8 +61,8 @@ public class BoolToColorConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         return value is true
-            ? new SolidColorBrush((Color)ColorConverter.ConvertFromString("#a6e3a1"))
-            : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f38ba8"));
+            ? new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#a6e3a1"))
+            : new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#f38ba8"));
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

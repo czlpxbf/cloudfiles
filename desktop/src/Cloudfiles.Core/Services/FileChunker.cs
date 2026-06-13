@@ -4,7 +4,10 @@ public class FileChunker
 {
     public int ChunkSizeBytes { get; set; } = 25 * 1024 * 1024; // 25 MB
 
-    public List<FileChunk> ChunkFile(string remotePath, byte[] fileBytes, string contentType)
+    /// <summary>
+    /// 将文件字节数组分块，每个分块的远程路径为 chunk-{index} 格式
+    /// </summary>
+    public List<FileChunk> ChunkFile(byte[] fileBytes, string contentType)
     {
         var chunks = new List<FileChunk>();
 
@@ -12,7 +15,7 @@ public class FileChunker
         {
             chunks.Add(new FileChunk
             {
-                RemotePath = remotePath,
+                RemotePath = "chunk-0",
                 Bytes = fileBytes,
                 ContentType = contentType,
                 ChunkIndex = 0,
@@ -32,7 +35,7 @@ public class FileChunker
 
             chunks.Add(new FileChunk
             {
-                RemotePath = remotePath,
+                RemotePath = $"chunk-{i}",
                 Bytes = chunkBytes,
                 ContentType = contentType,
                 ChunkIndex = i,

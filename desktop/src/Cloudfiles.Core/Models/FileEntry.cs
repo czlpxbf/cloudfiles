@@ -10,4 +10,20 @@ public class FileEntry
     public DateTime? LastModified { get; set; }
     public int ChunkCount { get; set; }
     public List<string> Chunks { get; set; } = new();
+    public int VersionCount { get; set; }
+
+    public string FormattedSize => FormatFileSize(Size);
+
+    private static string FormatFileSize(long bytes)
+    {
+        string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
+        int order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < suffixes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+        return $"{size:0.##} {suffixes[order]}";
+    }
 }

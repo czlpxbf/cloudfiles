@@ -29,12 +29,17 @@
                      Padding="10,8" FontSize="14" VerticalContentAlignment="Center" />
         </Grid>
 
-        <!-- Browse Button -->
-        <Button Grid.Row="2" Content="📁 选择文件"
-                Command="{Binding BrowseFilesCommand}"
-                Style="{StaticResource ActionButton}"
-                HorizontalAlignment="Left"
-                Margin="0,0,0,16" />
+        <!-- Browse Buttons -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,16">
+            <Button Content="📁 选择文件"
+                    Command="{Binding BrowseFilesCommand}"
+                    Style="{StaticResource ActionButton}"
+                    HorizontalAlignment="Left" />
+            <Button Content="📂 选择目录"
+                    Command="{Binding BrowseDirectoryCommand}"
+                    Style="{StaticResource ActionButton}"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
 
         <!-- File List -->
         <DataGrid Grid.Row="3"

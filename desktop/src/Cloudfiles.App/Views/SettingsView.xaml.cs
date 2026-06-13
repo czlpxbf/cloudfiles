@@ -2,7 +2,7 @@ using System.Windows.Controls;
 
 namespace Cloudfiles.App.Views;
 
-public partial class SettingsView : UserControl
+public partial class SettingsView : System.Windows.Controls.UserControl
 {
     public SettingsView()
     {
