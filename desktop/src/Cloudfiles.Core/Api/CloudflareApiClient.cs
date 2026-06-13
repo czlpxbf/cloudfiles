@@ -57,16 +57,20 @@ public class CloudflareApiClient
         return result?.Result ?? throw new InvalidOperationException("Failed to get project info");
     }
 
-    public async Task<List<DeploymentInfo>> ListDeploymentsAsync(string accountId, string projectName)
+    public async Task<JsonElement> GetFileIndexAsync(string projectUrl)
     {
-        var request = CreateRequest(HttpMethod.Get,
-            $"https://api.cloudflare.com/client/v4/accounts/{accountId}/pages/projects/{projectName}/deployments");
-        var response = await _httpClient.SendAsync(request);
+        var url = projectUrl.TrimEnd('/') + "/main.json";
+        var response = await _httpClient.GetAsync(url);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<CloudflareResponse<List<DeploymentInfo>>>(json, JsonOptions);
-        return result?.Result ?? new List<DeploymentInfo>();
+        return JsonSerializer.Deserialize<JsonElement>(json);
+    }
+
+    public async Task DeployMainJsonAsync(string accountId, string projectName, string jsonContent)
+    {
+        var bytes = Encoding.UTF8.GetBytes(jsonContent);
+        await DeployFileAsync(accountId, projectName, "/main.json", bytes, "application/json");
     }
 
     public async Task<string> DeployFileAsync(string accountId, string projectName, string remotePath, byte[] fileBytes, string contentType)
@@ -152,13 +156,6 @@ public class CloudflareApiClient
         }
 
         return urls;
-    }
-
-    public async Task DeleteFileAsync(string accountId, string projectName, string remotePath)
-    {
-        // Cloudflare Pages doesn't support individual file deletion directly.
-        // You need to redeploy without the file. This is a placeholder.
-        throw new NotImplementedException("Individual file deletion is not supported by Cloudflare Pages. Redeploy without the file instead.");
     }
 
     private HttpRequestMessage CreateRequest(HttpMethod method, string url)

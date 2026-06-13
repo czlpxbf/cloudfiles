@@ -12,6 +12,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Header -->
@@ -45,7 +46,7 @@
             <!-- Project Selection -->
             <StackPanel Grid.Row="3" Margin="0,0,0,20">
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="项目" Foreground="#a6adc8" FontSize="14" VerticalAlignment="Center" />
+                    <TextBlock Text="主项目" Foreground="#a6adc8" FontSize="14" VerticalAlignment="Center" />
                     <Button Content="加载项目" Command="{Binding LoadProjectsCommand}"
                             Style="{StaticResource ActionButton}" Margin="12,0,0,0" Padding="8,4" />
                 </StackPanel>
@@ -56,8 +57,18 @@
                           Padding="10,8" FontSize="14" />
             </StackPanel>
 
-            <!-- Chunk Size -->
+            <!-- Data Project Name -->
             <StackPanel Grid.Row="4" Margin="0,0,0,20">
+                <TextBlock Text="数据项目名称" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
+                <TextBox Text="{Binding DataProjectName, UpdateSourceTrigger=PropertyChanged}"
+                         Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
+                         Padding="10,8" FontSize="14" />
+                <TextBlock Text="用于存储文件分块数据的 Cloudflare Pages 项目名称"
+                           Foreground="#6c7086" FontSize="12" Margin="0,4,0,0" />
+            </StackPanel>
+
+            <!-- Chunk Size -->
+            <StackPanel Grid.Row="5" Margin="0,0,0,20">
                 <TextBlock Text="分块大小 (MB)" Foreground="#a6adc8" FontSize="14" Margin="0,0,0,8" />
                 <TextBox Text="{Binding ChunkSizeMB, UpdateSourceTrigger=PropertyChanged}"
                          Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
@@ -65,13 +76,13 @@
             </StackPanel>
 
             <!-- Save Button -->
-            <Button Grid.Row="5" Content="💾 保存设置"
+            <Button Grid.Row="6" Content="保存设置"
                     Command="{Binding SaveCommand}"
                     Style="{StaticResource AccentButton}"
                     HorizontalAlignment="Left" />
 
             <!-- Info -->
-            <Border Grid.Row="6" Background="#313244" CornerRadius="8" Padding="16" Margin="0,24,0,0">
+            <Border Grid.Row="7" Background="#313244" CornerRadius="8" Padding="16" Margin="0,24,0,0">
                 <StackPanel>
                     <TextBlock Text="如何获取 API Token 和账户 ID"
                                Foreground="#89b4fa" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8" />
@@ -79,7 +90,9 @@
                         <Run Text="1. 访问 https://dash.cloudflare.com/profile/api-tokens" /><LineBreak />
                         <Run Text="2. 创建一个具有 Cloudflare Pages 编辑权限的 Token" /><LineBreak />
                         <Run Text="3. 账户 ID 可在 Cloudflare 控制台 URL 中找到" /><LineBreak />
-                        <Run Text="4. 先创建 Pages 项目，然后在此选择" />
+                        <Run Text="4. 主项目用于存储文件索引 (main.json)" /><LineBreak />
+                        <Run Text="5. 数据项目用于存储文件分块数据" /><LineBreak />
+                        <Run Text="6. 请先在 Cloudflare 控制台创建两个 Pages 项目" />
                     </TextBlock>
                 </StackPanel>
             </Border>

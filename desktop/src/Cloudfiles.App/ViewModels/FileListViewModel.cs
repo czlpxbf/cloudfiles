@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cloudfiles.Core.Api;
@@ -16,22 +16,27 @@ public partial class FileListViewModel : ObservableObject
     private readonly ConfigService _configService;
 
     [ObservableProperty]
-    private ObservableCollection<DeploymentInfo> _deployments = new();
+    private ObservableCollection<FileEntry> _files = new();
 
     [ObservableProperty]
-    private DeploymentInfo? _selectedDeployment;
+    private FileEntry? _selectedFile;
 
     [ObservableProperty]
     private bool _isLoading;
-
-    [ObservableProperty]
-    private string _searchText = "";
 
     [ObservableProperty]
     private string _errorMessage = "";
 
     [ObservableProperty]
     private string _projectUrl = "";
+
+    [ObservableProperty]
+    private string _currentPath = "/";
+
+    [ObservableProperty]
+    private string _breadcrumb = "fs_root";
+
+    private JsonElement _fileIndexRoot;
 
     public FileListViewModel()
     {
@@ -47,21 +52,38 @@ public partial class FileListViewModel : ObservableObject
         if (!string.IsNullOrEmpty(_configService.Config.ApiToken))
         {
             _apiClient.SetApiToken(_configService.Config.ApiToken);
-            ProjectUrl = _configService.GetProjectUrl(_configService.Config.SelectedProject);
-            await LoadDeploymentsAsync();
+            await LoadProjectUrlAsync();
+            await LoadFileListAsync();
         }
+    }
+
+    private async Task LoadProjectUrlAsync()
+    {
+        if (string.IsNullOrEmpty(_configService.Config.AccountId) ||
+            string.IsNullOrEmpty(_configService.Config.SelectedProject))
+        {
+            return;
+        }
+
+        try
+        {
+            var project = await _apiClient.GetProjectAsync(
+                _configService.Config.AccountId,
+                _configService.Config.SelectedProject);
+            ProjectUrl = _configService.GetProjectUrl(project);
+        }
+        catch { }
     }
 
     [RelayCommand]
     private async Task Refresh()
     {
-        await LoadDeploymentsAsync();
+        await LoadFileListAsync();
     }
 
-    private async Task LoadDeploymentsAsync()
+    private async Task LoadFileListAsync()
     {
-        if (string.IsNullOrEmpty(_configService.Config.AccountId) ||
-            string.IsNullOrEmpty(_configService.Config.SelectedProject))
+        if (string.IsNullOrEmpty(ProjectUrl))
         {
             ErrorMessage = "请先在设置中配置账户 ID 和项目名称。";
             return;
@@ -71,14 +93,31 @@ public partial class FileListViewModel : ObservableObject
         {
             IsLoading = true;
             ErrorMessage = "";
-            var deployments = await _apiClient.ListDeploymentsAsync(
-                _configService.Config.AccountId,
-                _configService.Config.SelectedProject);
-            Deployments = new ObservableCollection<DeploymentInfo>(deployments);
+
+            var index = await _apiClient.GetFileIndexAsync(ProjectUrl);
+
+            if (index.TryGetProperty("fs_root", out var root))
+            {
+                _fileIndexRoot = root;
+                CurrentPath = "/";
+                Breadcrumb = "fs_root";
+                ParseAndDisplayChildren(root);
+            }
+            else
+            {
+                Files.Clear();
+                ErrorMessage = "main.json 格式不正确，缺少 fs_root 节点。";
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            ErrorMessage = $"加载文件列表失败: {ex.Message}";
+            Files.Clear();
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"加载部署列表失败: {ex.Message}";
+            ErrorMessage = $"解析文件列表失败: {ex.Message}";
+            Files.Clear();
         }
         finally
         {
@@ -86,35 +125,129 @@ public partial class FileListViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
-    private void Search()
+    private void ParseAndDisplayChildren(JsonElement node)
     {
-        if (string.IsNullOrWhiteSpace(SearchText))
+        var entries = new ObservableCollection<FileEntry>();
+
+        if (!node.TryGetProperty("children", out var children))
         {
-            _ = LoadDeploymentsAsync();
+            Files = entries;
             return;
         }
 
-        var filtered = Deployments.Where(d =>
-            d.Url.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-            d.Environment.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-            (d.CreatedOn ?? "").Contains(SearchText, StringComparison.OrdinalIgnoreCase)).ToList();
-        Deployments = new ObservableCollection<DeploymentInfo>(filtered);
+        foreach (var property in children.EnumerateObject())
+        {
+            var name = property.Name;
+            var value = property.Value;
+
+            if (value.ValueKind == JsonValueKind.Object &&
+                value.TryGetProperty("type", out var typeProp) &&
+                typeProp.GetString() == "folder")
+            {
+                entries.Add(new FileEntry
+                {
+                    Name = name,
+                    Path = CurrentPath == "/" ? $"/{name}" : $"{CurrentPath}/{name}",
+                    IsFolder = true,
+                    LastModified = TryGetDateTime(value, "modifiedAt") ?? TryGetDateTime(value, "createdAt")
+                });
+            }
+            else if (value.ValueKind == JsonValueKind.Array)
+            {
+                var latestVersion = value.EnumerateArray().LastOrDefault();
+                if (latestVersion.ValueKind != JsonValueKind.Undefined &&
+                    latestVersion.TryGetProperty("type", out var fileType) &&
+                    fileType.GetString() == "file")
+                {
+                    var chunks = new List<string>();
+                    if (latestVersion.TryGetProperty("chunks", out var chunksProp))
+                    {
+                        foreach (var chunk in chunksProp.EnumerateArray())
+                        {
+                            chunks.Add(chunk.GetString() ?? "");
+                        }
+                    }
+
+                    entries.Add(new FileEntry
+                    {
+                        Name = name,
+                        Path = CurrentPath == "/" ? $"/{name}" : $"{CurrentPath}/{name}",
+                        IsFolder = false,
+                        Size = latestVersion.TryGetProperty("size", out var sizeProp) ? sizeProp.GetInt64() : 0,
+                        LastModified = TryGetDateTime(latestVersion, "modifiedAt") ?? TryGetDateTime(latestVersion, "createdAt"),
+                        ChunkCount = chunks.Count,
+                        Chunks = chunks
+                    });
+                }
+            }
+        }
+
+        var sorted = entries.OrderByDescending(f => f.IsFolder).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        Files = new ObservableCollection<FileEntry>(sorted);
     }
 
     [RelayCommand]
-    private void OpenUrl()
+    private void OpenFolder(FileEntry? entry)
     {
-        if (SelectedDeployment == null) return;
-        try
+        if (entry == null || !entry.IsFolder) return;
+
+        NavigateIntoFolder(entry.Name);
+    }
+
+    private void NavigateIntoFolder(string folderName)
+    {
+        var node = FindNodeAtPath(CurrentPath);
+        if (node == null) return;
+
+        if (!node.Value.TryGetProperty("children", out var children)) return;
+        if (!children.TryGetProperty(folderName, out var folderNode)) return;
+
+        CurrentPath = CurrentPath == "/" ? $"/{folderName}" : $"{CurrentPath}/{folderName}";
+        Breadcrumb = CurrentPath.TrimStart('/').Replace("/", " > ");
+        ParseAndDisplayChildren(folderNode);
+    }
+
+    [RelayCommand]
+    private void NavigateUp()
+    {
+        if (CurrentPath == "/") return;
+
+        var parts = CurrentPath.Trim('/').Split('/');
+        if (parts.Length <= 1)
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = SelectedDeployment.Url,
-                UseShellExecute = true
-            });
+            CurrentPath = "/";
+            Breadcrumb = "fs_root";
+            ParseAndDisplayChildren(_fileIndexRoot);
         }
-        catch { }
+        else
+        {
+            var newPath = "/" + string.Join("/", parts[..^1]);
+            CurrentPath = newPath;
+            Breadcrumb = CurrentPath.TrimStart('/').Replace("/", " > ");
+
+            var node = FindNodeAtPath(CurrentPath);
+            if (node != null)
+            {
+                ParseAndDisplayChildren(node.Value);
+            }
+        }
+    }
+
+    private JsonElement? FindNodeAtPath(string path)
+    {
+        if (path == "/") return _fileIndexRoot;
+
+        var parts = path.Trim('/').Split('/');
+        JsonElement current = _fileIndexRoot;
+
+        foreach (var part in parts)
+        {
+            if (!current.TryGetProperty("children", out var children)) return null;
+            if (!children.TryGetProperty(part, out var child)) return null;
+            current = child;
+        }
+
+        return current;
     }
 
     [RelayCommand]
@@ -130,5 +263,18 @@ public partial class FileListViewModel : ObservableObject
             });
         }
         catch { }
+    }
+
+    private static DateTime? TryGetDateTime(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String)
+        {
+            var str = prop.GetString();
+            if (DateTime.TryParse(str, out var dt))
+            {
+                return dt;
+            }
+        }
+        return null;
     }
 }

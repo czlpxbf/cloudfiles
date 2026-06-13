@@ -1,5 +1,6 @@
 using System.Windows.Controls;
 using System.Windows.Input;
+using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.App.Views;
 
@@ -10,7 +11,7 @@ public partial class FileListView : UserControl
         InitializeComponent();
     }
 
-    private void ProjectUrl_Click(object sender, MouseButtonEventArgs e)
+    private void OpenProjectHome_Click(object sender, MouseButtonEventArgs e)
     {
         if (DataContext is ViewModels.FileListViewModel vm && !string.IsNullOrEmpty(vm.ProjectUrl))
         {
@@ -23,6 +24,14 @@ public partial class FileListView : UserControl
                 });
             }
             catch { }
+        }
+    }
+
+    private void FileList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is ViewModels.FileListViewModel vm && vm.SelectedFile is FileEntry entry && entry.IsFolder)
+        {
+            vm.OpenFolderCommand.Execute(entry);
         }
     }
 }

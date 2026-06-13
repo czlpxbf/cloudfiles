@@ -70,3 +70,16 @@ public class BoolToColorConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+
+public class FileTypeConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        return value is true ? "文件夹" : "文件";
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}

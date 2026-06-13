@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cloudfiles.Core.Models;
 
 namespace Cloudfiles.Core.Services;
 
@@ -35,13 +36,20 @@ public class ConfigService
         await File.WriteAllTextAsync(ConfigPath, json);
     }
 
-    public string GetProjectUrl(string projectName)
+    public string GetProjectUrl(PagesProject project)
     {
-        if (!string.IsNullOrEmpty(projectName))
+        var subdomain = project.Subdomain;
+        if (string.IsNullOrEmpty(subdomain))
         {
-            return $"https://{projectName}.pages.dev";
+            return "";
         }
-        return "";
+
+        if (subdomain.EndsWith(".pages.dev", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"https://{subdomain}";
+        }
+
+        return $"https://{subdomain}.pages.dev";
     }
 }
 
@@ -50,5 +58,6 @@ public class AppConfig
     public string ApiToken { get; set; } = "";
     public string AccountId { get; set; } = "";
     public string SelectedProject { get; set; } = "";
+    public string DataProjectName { get; set; } = "";
     public int ChunkSizeMB { get; set; } = 25;
 }

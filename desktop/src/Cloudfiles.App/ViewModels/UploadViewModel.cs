@@ -1,6 +1,7 @@
 using System.IO;
 using System.Collections.ObjectModel;
 using System.Net.Http;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Cloudfiles.Core.Api;
@@ -80,7 +81,7 @@ public partial class UploadViewModel : ObservableObject
     private void RemoveItem(UploadItem item)
     {
         UploadItems.Remove(item);
-        StatusMessage = $"{UploadItems.Count} file(s) selected";
+        StatusMessage = $"已选择 {UploadItems.Count} 个文件";
     }
 
     [RelayCommand]
@@ -99,32 +100,50 @@ public partial class UploadViewModel : ObservableObject
             return;
         }
 
+        var dataProjectName = _configService.Config.DataProjectName;
+        if (string.IsNullOrEmpty(dataProjectName))
+        {
+            StatusMessage = "请先在设置中配置数据项目名称";
+            return;
+        }
+
         try
         {
             IsUploading = true;
             UploadProgress = 0;
             StatusMessage = "上传中...";
 
-            var files = new List<(string remotePath, byte[] bytes, string contentType)>();
+            var chunkUrls = new Dictionary<string, List<string>>();
 
             foreach (var item in UploadItems)
             {
                 var fileBytes = await File.ReadAllBytesAsync(item.LocalPath);
-                files.Add((item.RemotePath, fileBytes, item.ContentType));
+                var chunks = new FileChunker { ChunkSizeBytes = _configService.Config.ChunkSizeMB * 1024 * 1024 }
+                    .ChunkFile(item.RemotePath, fileBytes, item.ContentType);
+
+                var urls = new List<string>();
+                var chunkFiles = chunks.Select(c => (c.RemotePath, c.Bytes, c.ContentType)).ToList();
+
+                _uploadService.ProgressChanged += (s, e) =>
+                {
+                    UploadProgress = e.Progress * 100;
+                    StatusMessage = $"上传中... {UploadProgress:F0}%";
+                };
+
+                var uploadedUrls = await _uploadService.UploadFilesAsync(
+                    _configService.Config.AccountId,
+                    dataProjectName,
+                    chunkFiles);
+
+                urls.AddRange(uploadedUrls);
+                chunkUrls[item.FileName] = urls;
             }
 
-            _uploadService.ProgressChanged += (s, e) =>
-            {
-                UploadProgress = e.Progress * 100;
-                StatusMessage = $"上传中... {UploadProgress:F0}%";
-            };
+            // Update main.json
+            StatusMessage = "更新文件索引...";
+            await UpdateMainJsonAsync(chunkUrls);
 
-            var urls = await _uploadService.UploadFilesAsync(
-                _configService.Config.AccountId,
-                _configService.Config.SelectedProject,
-                files);
-
-            StatusMessage = $"上传完成! 已部署 {urls.Count} 个文件";
+            StatusMessage = $"上传完成! 已上传 {UploadItems.Count} 个文件";
             UploadItems.Clear();
         }
         catch (Exception ex)
@@ -136,6 +155,90 @@ public partial class UploadViewModel : ObservableObject
             IsUploading = false;
             UploadProgress = 0;
         }
+    }
+
+    private async Task UpdateMainJsonAsync(Dictionary<string, List<string>> chunkUrls)
+    {
+        var accountId = _configService.Config.AccountId;
+        var mainProjectName = _configService.Config.SelectedProject;
+
+        // Get the main project URL to download current main.json
+        var project = await _apiClient.GetProjectAsync(accountId, mainProjectName);
+        var projectUrl = _configService.GetProjectUrl(project);
+
+        JsonElement index;
+        try
+        {
+            index = await _apiClient.GetFileIndexAsync(projectUrl);
+        }
+        catch
+        {
+            // If main.json doesn't exist yet, create a default structure
+            var defaultIndex = new
+            {
+                fs_root = new
+                {
+                    type = "folder",
+                    createdAt = DateTime.UtcNow.ToString("o"),
+                    modifiedAt = DateTime.UtcNow.ToString("o"),
+                    children = new { }
+                }
+            };
+            var defaultJson = JsonSerializer.Serialize(defaultIndex);
+            index = JsonSerializer.Deserialize<JsonElement>(defaultJson);
+        }
+
+        // Build the updated main.json
+        var indexDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(index.GetRawText())!;
+        var fsRootText = indexDict["fs_root"].GetRawText();
+        var fsRoot = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(fsRootText)!;
+
+        JsonElement childrenElement;
+        if (fsRoot.TryGetValue("children", out var existingChildren))
+        {
+            childrenElement = existingChildren;
+        }
+        else
+        {
+            childrenElement = JsonSerializer.Deserialize<JsonElement>("{}");
+        }
+
+        var childrenDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(childrenElement.GetRawText())!;
+
+        var now = DateTime.UtcNow.ToString("o");
+
+        foreach (var (fileName, urls) in chunkUrls)
+        {
+            var fileEntry = new
+            {
+                type = "file",
+                size = 0,
+                chunks = urls,
+                createdAt = now,
+                modifiedAt = now
+            };
+
+            if (childrenDict.TryGetValue(fileName, out var existing) && existing.ValueKind == JsonValueKind.Array)
+            {
+                // Append new version to the array
+                var versions = existing.EnumerateArray().ToList();
+                versions.Add(JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fileEntry)));
+                childrenDict[fileName] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(versions));
+            }
+            else
+            {
+                // Create new array with first version
+                var versions = new[] { fileEntry };
+                childrenDict[fileName] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(versions));
+            }
+        }
+
+        fsRoot["children"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(childrenDict));
+        fsRoot["modifiedAt"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(now));
+        indexDict["fs_root"] = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(fsRoot));
+
+        var updatedJson = JsonSerializer.Serialize(indexDict, new JsonSerializerOptions { WriteIndented = true });
+        await _apiClient.DeployMainJsonAsync(accountId, mainProjectName, updatedJson);
     }
 
     private static string GetContentType(string extension)

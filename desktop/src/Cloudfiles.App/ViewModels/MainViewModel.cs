@@ -17,7 +17,7 @@ public partial class MainViewModel : ObservableObject
     private void NavigateToFiles()
     {
         CurrentView = new FileListViewModel();
-        StatusText = "部署列表";
+        StatusText = "文件列表";
     }
 
     [RelayCommand]

@@ -7,6 +7,7 @@
     <converters:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
     <converters:FileSizeConverter x:Key="FileSizeConverter" />
     <converters:BoolToColorConverter x:Key="BoolToColorConverter" />
+    <converters:FileTypeConverter x:Key="FileTypeConverter" />
 
     <!-- Catppuccin Mocha Colors -->
     <Color x:Key="BaseColor">#1e1e2e</Color>

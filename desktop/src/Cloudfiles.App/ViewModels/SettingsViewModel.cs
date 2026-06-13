@@ -38,6 +38,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _chunkSizeMB = 25;
 
+    [ObservableProperty]
+    private string _dataProjectName = "";
+
     /// <summary>
     /// 获取选中的项目名称字符串
     /// </summary>
@@ -57,6 +60,7 @@ public partial class SettingsViewModel : ObservableObject
         ApiToken = _configService.Config.ApiToken;
         AccountId = _configService.Config.AccountId;
         ChunkSizeMB = _configService.Config.ChunkSizeMB;
+        DataProjectName = _configService.Config.DataProjectName;
 
         if (!string.IsNullOrEmpty(ApiToken))
         {
@@ -139,6 +143,7 @@ public partial class SettingsViewModel : ObservableObject
         _configService.Config.AccountId = AccountId;
         _configService.Config.SelectedProject = SelectedProjectName;
         _configService.Config.ChunkSizeMB = ChunkSizeMB;
+        _configService.Config.DataProjectName = DataProjectName;
         await _configService.SaveAsync();
         VerificationMessage = "设置已保存";
     }

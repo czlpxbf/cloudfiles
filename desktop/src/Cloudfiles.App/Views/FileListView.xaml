@@ -13,41 +13,35 @@
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <TextBlock Text="部署列表" Foreground="#cdd6f4" FontSize="24" FontWeight="Bold" VerticalAlignment="Center" />
-            <TextBlock Text="{Binding ProjectUrl}" Foreground="#89b4fa" FontSize="14"
-                       VerticalAlignment="Center" Margin="16,0,0,0"
-                       Cursor="Hand" MouseDown="ProjectUrl_Click" />
+            <TextBlock Text="文件列表" Foreground="#cdd6f4" FontSize="24" FontWeight="Bold" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Breadcrumb}" Foreground="#89b4fa" FontSize="14"
+                       VerticalAlignment="Center" Margin="16,0,0,0" />
         </StackPanel>
 
-        <!-- Search Bar -->
+        <!-- Toolbar -->
         <Grid Grid.Row="1" Margin="0,0,0,16">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <TextBox Grid.Column="0"
-                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                     Background="#313244" Foreground="#cdd6f4" BorderBrush="#45475a"
-                     Padding="10,8" FontSize="14"
-                     VerticalContentAlignment="Center">
-                <TextBox.Resources>
-                    <Style TargetType="Border">
-                        <Setter Property="CornerRadius" Value="6,0,0,6" />
-                    </Style>
-                </TextBox.Resources>
-            </TextBox>
-
-            <Button Grid.Column="1" Content="搜索"
-                    Command="{Binding SearchCommand}"
-                    Style="{StaticResource ActionButton}"
-                    Margin="0" />
-
+            <Button Grid.Column="0" Content="上传"
+                    Style="{StaticResource ActionButton}" />
+            <Button Grid.Column="1" Content="下载"
+                    Style="{StaticResource ActionButton}" />
             <Button Grid.Column="2" Content="刷新"
                     Command="{Binding RefreshCommand}"
-                    Style="{StaticResource ActionButton}"
-                    Margin="8,0,0,0" />
+                    Style="{StaticResource ActionButton}" />
+            <Button Grid.Column="3" Content="新建文件夹"
+                    Style="{StaticResource ActionButton}" />
+            <TextBlock Grid.Column="5" Text="打开项目主页"
+                       Foreground="#89b4fa" FontSize="13"
+                       VerticalAlignment="Center" Cursor="Hand"
+                       MouseDown="OpenProjectHome_Click" />
         </Grid>
 
         <!-- Error Message -->
@@ -55,13 +49,14 @@
                    Foreground="#f38ba8" FontSize="13" Margin="0,0,0,8"
                    Visibility="{Binding ErrorMessage, Converter={StaticResource StringToVisibilityConverter}}" />
 
-        <!-- Deployment List -->
+        <!-- File List -->
         <ListView Grid.Row="3"
-                  ItemsSource="{Binding Deployments}"
-                  SelectedItem="{Binding SelectedDeployment}"
+                  ItemsSource="{Binding Files}"
+                  SelectedItem="{Binding SelectedFile}"
                   Background="Transparent" BorderBrush="#45475a"
                   Foreground="#cdd6f4"
-                  Margin="0,8,0,0">
+                  Margin="0,8,0,0"
+                  MouseDoubleClick="FileList_DoubleClick">
             <ListView.Resources>
                 <Style TargetType="ListViewItem">
                     <Setter Property="Background" Value="Transparent" />
@@ -80,26 +75,23 @@
             </ListView.Resources>
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="环境" Width="100"
-                                    DisplayMemberBinding="{Binding Environment}" />
-                    <GridViewColumn Header="状态" Width="100"
-                                    DisplayMemberBinding="{Binding Status}" />
-                    <GridViewColumn Header="URL" Width="300"
-                                    DisplayMemberBinding="{Binding Url}" />
-                    <GridViewColumn Header="创建时间" Width="200"
-                                    DisplayMemberBinding="{Binding CreatedOn}" />
+                    <GridViewColumn Header="名称" Width="300"
+                                    DisplayMemberBinding="{Binding Name}" />
+                    <GridViewColumn Header="大小" Width="120"
+                                    DisplayMemberBinding="{Binding Size, Converter={StaticResource FileSizeConverter}}" />
+                    <GridViewColumn Header="类型" Width="100"
+                                    DisplayMemberBinding="{Binding IsFolder, Converter={StaticResource FileTypeConverter}}" />
+                    <GridViewColumn Header="修改时间" Width="200"
+                                    DisplayMemberBinding="{Binding LastModified, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss}'}" />
                 </GridView>
             </ListView.View>
         </ListView>
 
-        <!-- Actions -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="打开项目"
-                    Command="{Binding OpenProjectUrlCommand}"
+        <!-- Navigation -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,16,0,0">
+            <Button Content="上一级"
+                    Command="{Binding NavigateUpCommand}"
                     Style="{StaticResource ActionButton}" />
-            <Button Content="打开部署"
-                    Command="{Binding OpenUrlCommand}"
-                    Style="{StaticResource ActionButton}" Margin="8,0,0,0" />
         </StackPanel>
 
         <!-- Loading Overlay -->

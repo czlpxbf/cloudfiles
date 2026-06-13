@@ -38,7 +38,7 @@
                                Foreground="#cdd6f4"
                                FontSize="20"
                                FontWeight="Bold" />
-                    <TextBlock Text="Cloudflare Pages 管理工具"
+                    <TextBlock Text="Cloudflare Pages 文件存储"
                                Foreground="#6c7086"
                                FontSize="11"
                                Margin="0,4,0,0" />
@@ -46,7 +46,7 @@
 
                 <!-- Navigation -->
                 <StackPanel Grid.Row="1" Margin="8,0">
-                    <Button Content="📁 部署"
+                    <Button Content="📁 文件"
                             Style="{StaticResource NavButton}"
                             Command="{Binding NavigateToFilesCommand}"
                             Tag="Files" />
