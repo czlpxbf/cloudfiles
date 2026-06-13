@@ -50,5 +50,6 @@ public class AppConfig
     public string ApiToken { get; set; } = "";
     public string AccountId { get; set; } = "";
     public string SelectedProject { get; set; } = "";
+    public string DataProjectName { get; set; } = "";
     public int ChunkSizeMB { get; set; } = 25;
 }

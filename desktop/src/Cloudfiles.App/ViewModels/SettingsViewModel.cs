@@ -18,7 +18,10 @@ public partial class SettingsViewModel : ObservableObject
     private string _accountId = "";
 
     [ObservableProperty]
-    private string _selectedProject = "";
+    private PagesProject? _selectedProject;
+
+    [ObservableProperty]
+    private PagesProject? _selectedDataProject;
 
     [ObservableProperty]
     private ObservableCollection<PagesProject> _projects = new();
@@ -48,12 +51,33 @@ public partial class SettingsViewModel : ObservableObject
         await _configService.LoadAsync();
         ApiToken = _configService.Config.ApiToken;
         AccountId = _configService.Config.AccountId;
-        SelectedProject = _configService.Config.SelectedProject;
         ChunkSizeMB = _configService.Config.ChunkSizeMB;
 
         if (!string.IsNullOrEmpty(ApiToken))
         {
             _apiClient.SetApiToken(ApiToken);
+        }
+
+        // Load projects first, then set selected items by name
+        if (!string.IsNullOrEmpty(AccountId) && !string.IsNullOrEmpty(ApiToken))
+        {
+            try
+            {
+                _apiClient.SetApiToken(ApiToken);
+                var projects = await _apiClient.ListProjectsAsync(AccountId);
+                Projects = new ObservableCollection<PagesProject>(projects);
+
+                // Match saved project names to PagesProject objects
+                if (!string.IsNullOrEmpty(_configService.Config.SelectedProject))
+                {
+                    SelectedProject = Projects.FirstOrDefault(p => p.Name == _configService.Config.SelectedProject);
+                }
+                if (!string.IsNullOrEmpty(_configService.Config.DataProjectName))
+                {
+                    SelectedDataProject = Projects.FirstOrDefault(p => p.Name == _configService.Config.DataProjectName);
+                }
+            }
+            catch { }
         }
     }
 
@@ -62,26 +86,26 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ApiToken))
         {
-            VerificationMessage = "Please enter an API token";
+            VerificationMessage = "请输入 API Token";
             return;
         }
 
         try
         {
             IsVerifying = true;
-            VerificationMessage = "Verifying...";
+            VerificationMessage = "验证中...";
             _apiClient.SetApiToken(ApiToken);
 
             var tokenInfo = await _apiClient.VerifyTokenAsync();
             IsTokenValid = tokenInfo.Status == "active";
             VerificationMessage = IsTokenValid
-                ? $"Token valid (ID: {tokenInfo.Id})"
-                : $"Token status: {tokenInfo.Status}";
+                ? $"Token 有效 (ID: {tokenInfo.Id})"
+                : $"Token 状态: {tokenInfo.Status}";
         }
         catch (Exception ex)
         {
             IsTokenValid = false;
-            VerificationMessage = $"Verification failed: {ex.Message}";
+            VerificationMessage = $"验证失败: {ex.Message}";
         }
         finally
         {
@@ -105,7 +129,7 @@ public partial class SettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            VerificationMessage = $"Failed to load projects: {ex.Message}";
+            VerificationMessage = $"加载项目失败: {ex.Message}";
         }
     }
 
@@ -114,9 +138,10 @@ public partial class SettingsViewModel : ObservableObject
     {
         _configService.Config.ApiToken = ApiToken;
         _configService.Config.AccountId = AccountId;
-        _configService.Config.SelectedProject = SelectedProject;
+        _configService.Config.SelectedProject = SelectedProject?.Name ?? "";
+        _configService.Config.DataProjectName = SelectedDataProject?.Name ?? "";
         _configService.Config.ChunkSizeMB = ChunkSizeMB;
         await _configService.SaveAsync();
-        VerificationMessage = "Settings saved successfully";
+        VerificationMessage = "设置已保存";
     }
 }
