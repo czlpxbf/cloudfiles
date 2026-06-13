@@ -1,5 +1,6 @@
 using System.IO;
 using System.Collections.ObjectModel;
+using System.Net.Http;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -153,7 +154,7 @@ public partial class UploadViewModel : ObservableObject
 
             // Step 3: Download current main.json from main project
             var mainProject = await _apiClient.GetProjectAsync(_configService.Config.AccountId, _configService.Config.SelectedProject);
-            var mainProjectUrl = _configService.GetProjectUrl(mainProject);
+            var mainProjectUrl = $"https://{mainProject.Subdomain}.pages.dev";
 
             JsonElement index;
             try
