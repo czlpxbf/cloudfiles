@@ -30,14 +30,17 @@ jobs:
       - name: Build distribution
         run: node scripts/build.js
 
-      - name: Package ZIP
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build installer
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
-          Compress-Archive -Path "dist\cloudfiles\*" -DestinationPath "Cloudfiles-${version}-win64.zip"
+          makensis /DVERSION=$version installer/cloudfiles.nsi
         shell: pwsh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: Cloudfiles-*-win64.zip
+          files: Cloudfiles-Setup-*.exe
           generate_release_notes: true
