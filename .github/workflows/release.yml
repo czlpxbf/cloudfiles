@@ -1,9 +1,9 @@
-name: Release
+name: Release (Node.js)
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v2*'
 
 permissions:
   contents: write
@@ -30,17 +30,14 @@ jobs:
       - name: Build distribution
         run: node scripts/build.js
 
-      - name: Install NSIS
-        run: choco install nsis -y
-
-      - name: Build installer
+      - name: Package ZIP
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
-          makensis /DVERSION=$version installer/cloudfiles.nsi
+          Compress-Archive -Path "dist\cloudfiles\*" -DestinationPath "Cloudfiles-${version}-win64.zip"
         shell: pwsh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: Cloudfiles-Setup-*.exe
+          files: Cloudfiles-*-win64.zip
           generate_release_notes: true

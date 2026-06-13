@@ -1,0 +1,51 @@
+name: Release (Desktop)
+
+on:
+  push:
+    tags:
+      - 'v3*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore desktop/Cloudfiles.sln
+
+      - name: Build
+        run: dotnet build desktop/Cloudfiles.sln --configuration Release --no-restore
+
+      - name: Publish single-file exe
+        run: |
+          dotnet publish desktop/src/Cloudfiles.App/Cloudfiles.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/Cloudfiles
+        shell: pwsh
+
+      - name: Package ZIP
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          Compress-Archive -Path "publish\Cloudfiles\*" -DestinationPath "Cloudfiles-Desktop-${version}-win64.zip"
+        shell: pwsh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Cloudfiles-Desktop-*-win64.zip
+          generate_release_notes: true
