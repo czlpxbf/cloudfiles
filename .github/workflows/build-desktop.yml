@@ -21,10 +21,10 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore desktop/Cloudfiles.sln
+        run: dotnet restore desktop/Cloudfiles.sln -r win-x64
 
       - name: Build
-        run: dotnet build desktop/Cloudfiles.sln --configuration Release --no-restore
+        run: dotnet build desktop/Cloudfiles.sln --configuration Release
 
       - name: Publish single-file exe
         run: |
